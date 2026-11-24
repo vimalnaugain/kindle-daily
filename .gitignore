@@ -1,7 +1,7 @@
 .venv/
 __pycache__/
 .pytest_cache/
-site/
+/site/
 app/build/
 app/native/*.so
 app/tests/out/
