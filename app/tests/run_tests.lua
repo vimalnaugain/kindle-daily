@@ -264,5 +264,96 @@ test("telegram: pairing, commands, replies, ignores strangers", function()
     eq(tg:poll(), 0, "no repeats")
 end)
 
+local function new_app(name, extra)
+    local home = make_home(name, extra)
+    os.execute(string.format("cp %s/e2e/data/brief.json %s/e2e/data/weather.lua %s/data/ 2>/dev/null", OUT, OUT, home))
+    local cfg = util.load_table(home .. "/config.lua")
+    cfg.data_dir = home .. "/data"
+    local app = require("daily.app").new({ root = root, home = home, device = "emulator", config = cfg })
+    app.dashboard = app.ui:show(require("daily.dashboard").new(app))
+    return app, home
+end
+
+local function draw_top(app)
+    local c = require("core.canvas").new(app.device.width, app.device.height)
+    app.ui:top():draw(c)
+    return c
+end
+
+local function tap_key(app, key)
+    local kb = app.ui:top()
+    draw_top(app)
+    for _, t in ipairs(kb.targets) do
+        if t.key == key or (t.chip and t.chip.text == key) then
+            kb:handle({ type = "tap", x = t.r.x + t.r.w / 2, y = t.r.y + t.r.h / 2 })
+            return
+        end
+    end
+    error("no key " .. key)
+end
+
+test("to-do: add one on the Kindle with the on-screen keyboard", function()
+    local app = new_app("keyboard")
+    local dash = app.dashboard
+    draw_top(app)
+    -- the "+ ADD" corner of the to-do card opens the keyboard
+    local r = dash.cards.todo
+    dash:handle({ type = "tap", x = r.x + r.w - 30, y = r.y + 25 })
+    local kb = app.ui:top()
+    assert(kb.title == "Add to-do", "keyboard open")
+    for _, ch in ipairs({ "c", "a", "l", "l", " ", "b", "a", "n", "k" }) do tap_key(app, ch) end
+    eq(kb.text, "Call bank", "auto capital, then lower case")
+    tap_key(app, "\226\140\171") -- backspace
+    tap_key(app, "k")
+    tap_key(app, "123"); tap_key(app, "2"); tap_key(app, "ABC")
+    eq(kb.text, "Call bank2")
+    tap_key(app, "\226\140\171")
+    tap_key(app, "Tomorrow")
+    util.write_file(OUT .. "/keyboard.png", draw_top(app):to_png())
+    tap_key(app, "DONE")
+    local open = app.todo:open()
+    eq(#open, 1)
+    eq(open[1].text, "Call bank")
+    eq(app.todo:due_label(open[1]), "tomorrow")
+    assert(app.ui:top() == dash, "keyboard closed")
+    -- the full list: add row first, tap ticks off, hold deletes
+    app:show_todo()
+    local view = app.ui:top()
+    eq(view.items[1].text, "+  Add a to-do")
+    view.items[2].callback(view.items[2])
+    eq(#app.todo:open(), 0, "ticked off")
+end)
+
+test("updates: checks once a day, downloads, verifies, asks to restart", function()
+    local site = OUT .. "/update-site"
+    os.execute("rm -rf " .. site)
+    util.mkdir_p(site)
+    util.write_file(site .. "/daily-latest.kpkg", "fake package contents")
+    local p = io.popen("sha256sum " .. site .. "/daily-latest.kpkg")
+    local sum = p:read("*a"):match("^(%x+)")
+    p:close()
+    util.write_file(site .. "/latest.json", json.encode({ version = "9.9.9", file = "daily-latest.kpkg", sha256 = sum, size = 21 }))
+    local app, home = new_app("updates", { update_url = "file://" .. site .. "/latest.json" })
+    app.version = "0.2.0"
+    local Updater = require("daily.updater")
+    assert(Updater.newer("0.10.0", "0.9.9") and not Updater.newer("0.2.0", "0.2.0"))
+    app:auto_update()
+    assert(util.file_exists(home .. "/update/daily-update.kpkg"), "downloaded")
+    eq(Updater.pending(app), "9.9.9")
+    local dlg = app.ui:top()
+    eq(dlg.title, "Update ready")
+    dlg.buttons[2].callback()
+    eq(app.exit_code, 85, "asks the launcher to install")
+    -- a damaged download is refused
+    util.write_file(site .. "/latest.json", json.encode({ version = "9.9.10", file = "daily-latest.kpkg", sha256 = string.rep("0", 64) }))
+    os.remove(home .. "/update/daily-update.kpkg")
+    app.data.state.update_checked = nil
+    app:auto_update()
+    assert(not util.file_exists(home .. "/update/daily-update.kpkg"), "checksum mismatch rejected")
+    -- and it only checks once a day
+    util.write_file(site .. "/latest.json", "not json")
+    app:auto_update()
+end)
+
 print(string.format("\n%d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)

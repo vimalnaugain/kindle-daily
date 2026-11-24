@@ -8,13 +8,22 @@ A dashboard of cards that opens on a jailbroken Kindle:
   Delhi & India, International and Stocks, with Nifty, Sensex and Nifty Bank.
   Tap a headline to read it; the last page has a QR code for the original
 - **Article of the day**: Wikipedia's featured article, in full
-- **To-do**: sent from your phone through your own Telegram bot; tap to tick off
+- **To-do**: add items on the Kindle (**+ ADD** opens a keyboard) or from your
+  phone through your own Telegram bot; tap to tick off, long-press to delete
 - **Calendar**: this month, with dots on busy days, and today's and tomorrow's
   events from Google Calendar's private iCal address
 
 It refreshes when it opens, when the Kindle wakes, and every 30 minutes
 (Telegram every 2 minutes) while it's on. Everything is cached, so it works
 offline, and while the Kindle sleeps the screen keeps today's dashboard.
+
+## Updates
+
+Daily updates itself. Once a day, when it's online, it checks the site for a
+new version, downloads it in the background (checking its SHA-256), and asks
+to restart. Choose **Later** and it installs the next time you open Daily.
+**Menu → Check for updates** does it on demand. To turn it off:
+`auto_update = false` in config.lua.
 
 ## Telegram to-do
 

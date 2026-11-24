@@ -121,23 +121,40 @@ end
 --- Full to-do list: tap to tick off, long-press to delete.
 function App:show_todo()
     local view
-    local function build()
-        local rows = {}
+    local build
+    local function delete(it)
+        self:confirm({ title = "Delete?", text = it.text, ok_text = "Delete", on_ok = function()
+            self.todo:remove(it); view:set_items(build())
+        end })
+    end
+    build = function()
+        local rows = { { text = "+  Add a to-do", bold = true, callback = function()
+            self:add_todo(function() view:set_items(build()) end)
+        end } }
         for _, it in ipairs(self.todo:open()) do
             rows[#rows + 1] = { text = "\u{2610}  " .. it.text, subtext = self.todo:due_label(it),
-                callback = function() self.todo:set_done(it, true); view:set_items(build()) end }
+                callback = function() self.todo:set_done(it, true); view:set_items(build()) end,
+                hold_callback = function() delete(it) end }
         end
-        for _, it in ipairs(self.todo:recently_done()) do
-            rows[#rows + 1] = { text = "\u{2611}  " .. it.text, subtext = "done",
-                callback = function() self.todo:set_done(it, false); view:set_items(build()) end }
+        local done = self.todo:recently_done()
+        for _, it in ipairs(done) do
+            rows[#rows + 1] = { text = "\u{2611}  " .. it.text, subtext = "done \u{00B7} tap to undo",
+                callback = function() self.todo:set_done(it, false); view:set_items(build()) end,
+                hold_callback = function() delete(it) end }
         end
-        if #rows == 0 then
-            rows[1] = { text = self.telegram and "Nothing to do. Message your bot to add items."
-                or "Add telegram_token to config.lua to send to-dos from your phone.", callback = function() end }
+        if #done > 0 then
+            rows[#rows + 1] = { text = "Clear ticked-off items", callback = function()
+                for _, it in ipairs(done) do self.todo:remove(it) end
+                view:set_items(build())
+            end }
+        end
+        if #rows == 1 then
+            rows[2] = { text = self.telegram and "Nothing to do. Add one here or message your bot."
+                or "Nothing to do. Add one here (or set up Telegram in config.lua).", callback = function() end }
         end
         return rows
     end
-    view = self.ui:show(W.ListView.new({ title = "To-do", items = build() }))
+    view = self.ui:show(W.ListView.new({ title = "To-do  (tap: tick off, hold: delete)", items = build() }))
     view.on_close = function() if self.dashboard then self.ui:set_dirty("full") end end
 end
 
@@ -216,6 +233,7 @@ end
 function App:show_menu()
     local items = {
         { text = "Refresh now", callback = function() self:refresh(true) end },
+        { text = "Add a to-do", callback = function() self:add_todo() end },
         { text = function() return "City: " .. self:city().name end, callback = function() self:choose_city() end },
         { text = function()
             return "Article text: " .. ({ s = "Small", m = "Medium", l = "Large" })[self.settings.article_size or "m"]
@@ -224,10 +242,82 @@ function App:show_menu()
             local m = self:sleep_minutes()
             return "Auto sleep: " .. (m > 0 and (m .. " minutes") or "never")
         end, callback = function() self:choose_sleep() end },
+        { text = function()
+            local p = require("daily.updater").pending(self)
+            return p and ("Install update " .. p .. " (restart)") or ("Check for updates (" .. self.version .. ")")
+        end, callback = function()
+            if require("daily.updater").pending(self) then self:quit(85) else require("daily.updater").run(self) end
+        end },
         { text = "About", callback = function() self:show_about() end },
         { text = "Exit to Kindle", callback = function() self:quit() end },
     }
     self.ui:show(W.Menu.new({ title = "Daily", items = items }))
+end
+
+-- The small dialog API the updater (from Tome) uses.
+function App:notify(text, ms)
+    return self.ui:show(W.Dialog.new({ text = text, timeout_ms = ms or 2500 }))
+end
+
+function App:confirm(opts)
+    return self.ui:show(W.Dialog.new({ title = opts.title, text = opts.text, buttons = {
+        { text = opts.cancel_text or "Cancel", callback = opts.on_cancel },
+        { text = opts.ok_text or "OK", primary = true, callback = opts.on_ok },
+    } }))
+end
+
+function App:show_progress(opts)
+    local dlg = W.Dialog.new({ title = opts.title, text = opts.text or "Working\u{2026}", dismissable = false,
+        buttons = { { text = "Cancel", callback = function() if opts.on_cancel then opts.on_cancel() end end } } })
+    self.ui:show(dlg)
+    return { set_text = function(_, t) dlg:set_text(t) end, close = function() self.ui:close(dlg) end }
+end
+
+function App:run_task(fn, on_error) return self.ui:spawn(fn, on_error) end
+
+--- Once a day: look for a new version, download it in the background, then
+-- offer to restart. Declined updates install the next time Daily starts.
+-- Inside a task.
+function App:auto_update()
+    if self.config.auto_update == false or self.version == "dev" then return end
+    local Updater = require("daily.updater")
+    local state, now = self.data.state, self.clock:now()
+    if Updater.pending(self) then return end
+    if state.update_checked and now - state.update_checked < 20 * 3600 then return end
+    local info = Updater.check(self)
+    state.update_checked = now
+    self.data:_save_state()
+    if not info or not Updater.newer(info.version, self.version) then return end
+    log.info("update", info.version, "available: downloading")
+    local path, err = Updater.download(self, info)
+    if not path then log.warn("update download failed:", err); return end
+    state.update_ready = info.version
+    self.data:_save_state()
+    self.ui:show(W.Dialog.new({ title = "Update ready",
+        text = string.format("Daily %s is downloaded (you have %s). Restart now to install it?\n\n"
+            .. "If you choose Later, it installs the next time you open Daily.", info.version, self.version),
+        buttons = {
+            { text = "Later" },
+            { text = "Restart", primary = true, callback = function() self:quit(85) end },
+        } }))
+end
+
+------------------------------------------------------------------------------
+-- To-do on the Kindle
+------------------------------------------------------------------------------
+
+function App:add_todo(after)
+    local Keyboard = require("core.ui.keyboard")
+    self.ui:show(Keyboard.new({
+        title = "Add to-do", ok_text = "Add", hint = "e.g. buy milk, call bank tomorrow",
+        chips = { { text = "Today", insert = "today" }, { text = "Tomorrow", insert = "tomorrow" } },
+        on_done = function(text)
+            local what, due = self.todo:split_due(text)
+            self.todo:add(what, due)
+            self.ui:set_dirty("full")
+            if after then after() end
+        end,
+    }))
 end
 
 function App:choose(title, items, on_choose)
@@ -295,6 +385,7 @@ function App:refresh(force)
     self.ui:spawn(function()
         local r = self.data:refresh(force)
         if r.brief == "updated" then self.ui:set_dirty("full") else self.ui:set_dirty("partial") end
+        if self.data.last_ok == self.data.last_attempt then self:auto_update() end
     end, function(err)
         self.data.refreshing = false
         self.data.last_error = tostring(err)

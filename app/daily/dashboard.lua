@@ -349,11 +349,14 @@ end
 function Dashboard:_todo(c, m, r)
     local todo = self.app.todo
     local open, done = todo:open(), todo:recently_done()
-    local b = self:card(c, m, r, "To-do", #open > 0 and (#open .. " LEFT") or nil)
+    local b = self:card(c, m, r, #open > 0 and ("To-do \u{00B7} " .. #open) or "To-do", self.sleep_mode and "" or "+ ADD")
     add_target(self, { x = r.x, y = r.y, w = r.w, h = b.y - r.y }, function() self.app:show_todo() end)
+    local add_w = m.label:width("+ ADD") + 2 * m.inner
+    add_target(self, { x = r.x + r.w - add_w - m.px(10), y = r.y, w = add_w + m.px(10), h = b.y - r.y + m.px(6) },
+        function() self.app:add_todo() end)
     if #open == 0 and #done == 0 then
-        local msg = self.app.telegram and "All clear. Message your Telegram bot to add something."
-            or "Add telegram_token to config.lua to send to-dos from your phone."
+        local msg = self.app.telegram and "All clear. Tap + Add, or message your Telegram bot."
+            or "All clear. Tap + Add to write one here."
         local lines = wrap_n(m.body, msg, b.w, math.max(1, math.floor(b.h / m.body.line_height)))
         for i, l in ipairs(lines) do c:text(m.body, l, b.x, b.y + i * m.body.line_height - m.body.descent, 80) end
         return

@@ -25,6 +25,9 @@ return {
     day_starts_at = 7,
     day_ends_at = 23,
 
+    -- Daily checks for a new version once a day and offers to restart.
+    auto_update = true,
+
     -- Minutes without a tap before the Kindle sleeps (0 = never).
     -- While asleep, the screen keeps showing today's dashboard.
     sleep_after_minutes = 10,
