@@ -39,7 +39,11 @@ jobs:
         working-directory: job
         env:
           PREVIOUS_SITE_URL: ${{ steps.pages.outputs.base_url }}
-        run: python -W ignore -m daily.build --config config.yml --out ../site --report "$GITHUB_STEP_SUMMARY"
+        # One retry: a flaky site or a crash shouldn't cost a morning's edition.
+        run: |
+          python -W ignore -m daily.build --config config.yml --out ../site --report "$GITHUB_STEP_SUMMARY" \
+            || { echo "Build failed; retrying in 60 s"; sleep 60; rm -rf ../site;
+                 python -W ignore -m daily.build --config config.yml --out ../site --report "$GITHUB_STEP_SUMMARY"; }
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

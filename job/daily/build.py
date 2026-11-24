@@ -42,37 +42,61 @@ def fetch_feeds(fetcher, categories):
     """-> {(cat_id, feed_name): [Item]}, [status rows]"""
     jobs = [(c, f) for c in categories for f in c["feeds"]]
 
-    def run(job):
-        cat, feed = job
+    def download(job):
         try:
-            r = fetcher.get(feeds_mod.feed_url(feed))
-            items = feeds_mod.parse(r.body, feed)
-            return job, items, None
+            return fetcher.get(feeds_mod.feed_url(job[1])).body, None
         except Exception as e:
-            return job, [], str(e)[:160]
+            return None, str(e)[:160]
+
+    # Threads only download. Parsing (lxml/libxml2) stays on this thread: it is
+    # not safe to run in parallel and crashed the process once.
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        downloads = list(pool.map(download, jobs))
+
+    def parse(job, body, err):
+        if err:
+            return [], err
+        try:
+            return feeds_mod.parse(body, job[1]), None
+        except Exception as e:
+            return [], str(e)[:160]
 
     results, status = {}, []
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        for (cat, feed), items, err in pool.map(run, jobs):
-            results[(cat["id"], feed["name"])] = items
-            full = sum(1 for it in items if it.extra.get("content_html"))
-            status.append({"category": cat["id"], "feed": feed["name"], "ok": err is None,
-                           "items": len(items), "full_text_in_feed": full, **({"error": err} if err else {})})
-            log(f"  {'ok ' if err is None else 'ERR'} {cat['id']:15} {feed['name']:25} {len(items):3} {err or ''}")
+    for job, (body, derr) in zip(jobs, downloads):
+        cat, feed = job
+        items, err = parse(job, body, derr)
+        results[(cat["id"], feed["name"])] = items
+        full = sum(1 for it in items if it.extra.get("content_html"))
+        status.append({"category": cat["id"], "feed": feed["name"], "ok": err is None,
+                       "items": len(items), "full_text_in_feed": full, **({"error": err} if err else {})})
+        log(f"  {'ok ' if err is None else 'ERR'} {cat['id']:15} {feed['name']:25} {len(items):3} {err or ''}")
     return results, status
 
 
-def fetch_article(fetcher, story):
+def download_article(fetcher, story):
+    """Network only (safe in threads): -> (html, final_url, error)."""
     lead = story.lead
     if lead.kind == "google":
-        return None, "Google News link only"
-    text, err = None, None
+        return None, None, "Google News link only"
     try:
         r = fetcher.get(lead.url, accept="text/html,application/xhtml+xml")
-        html = r.body.decode("utf-8", errors="replace")
-        text, err = extract_mod.extract(html, r.url, lead.title)
+        return r.body.decode("utf-8", errors="replace"), r.url, None
     except Exception as e:
-        err = str(e)[:120]
+        return None, None, str(e)[:120]
+
+
+def fetch_article(fetcher, story, downloaded=None):
+    """-> (markdown, None) or (None, reason). Parsing happens on the calling thread."""
+    lead = story.lead
+    html, url, err = downloaded or download_article(fetcher, story)
+    if lead.kind == "google":
+        return None, err
+    text = None
+    if html is not None:
+        try:
+            text, err = extract_mod.extract(html, url, lead.title)
+        except Exception as e:
+            err = str(e)[:120]
     if text is None and lead.extra.get("content_html"):
         # The site blocked us (or the page was thin) but the feed carries the article.
         page = f"<html><body><article>{lead.extra['content_html']}</article></body></html>"
@@ -164,7 +188,8 @@ def build(config, fetcher, now=None):
                 exclude_urls=used_urls, exclude_tokens=used_tokens, elsewhere=elsewhere,
                 exclude_topics=used_topics, blocked_sources=ed.get("blocked_sources", ()),
                 exclude_patterns=cat.get("exclude", ()))
-            texts = list(pool.map(lambda st: fetch_article(fetcher, st), candidates))
+            pages = list(pool.map(lambda st: download_article(fetcher, st), candidates))
+            texts = [fetch_article(fetcher, st, pg) for st, pg in zip(candidates, pages)]
             rows = [(st, *tx) for st, tx in zip(candidates, texts)]
             chosen = choose(rows, n, ed.get("max_per_source", 2))
             for st, _, _ in chosen:
