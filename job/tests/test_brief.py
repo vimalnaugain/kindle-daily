@@ -433,7 +433,8 @@ def test_build_with_reads_and_quote(tmp_path):
     web.pages["https://a/1"] = essay("Essay one")
     web.pages["https://a/2"] = essay("Essay two")
     web.pages[quote.GUTENBERG.format(id=7)] = ("Happiness is not a thing to be pursued for itself. All the great truths "
-                                               "of life must be lived to be known. Every man knows this.").encode()
+                                               "of life must be lived to be known, and every man who has loved knows this "
+                                               "in his heart. The world is wide, and time is never wasted on a good mind.").encode()
     # yesterday's site: one read whose text must be carried over
     web.pages["https://me.github.io/daily/brief.json"] = json.dumps({"reads": [
         {"id": "old1", "title": "Old essay", "source": "A", "url": "https://a/old", "summary": "", "words": 2000,
