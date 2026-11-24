@@ -33,8 +33,8 @@ Kindle talks to those services directly.
 | Phase | | |
 |---|---|---|
 | 1 | Morning news job (`job/`) | **built** |
-| 2 | Kindle app: dashboard screen, weather, news, reading articles | next |
-| 3 | To-do list and Telegram bot | |
+| 2 | Kindle app (`app/`): dashboard, weather, markets, news, reading articles | **built** |
+| 3 | To-do list and Telegram bot | next |
 | 4 | Google Calendar | |
 | 5 | Phone setup page, polish | |
 

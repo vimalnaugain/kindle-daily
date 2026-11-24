@@ -1,0 +1,26 @@
+{
+	"items": [
+		{
+			"name": "Daily",
+			"priority": 0,
+			"items": [
+				{
+					"name": "Start Daily",
+					"priority": 1,
+					"action": "/bin/sh",
+					"params": "/mnt/us/kmc/kpm/packages/daily/launch.sh",
+					"status": false,
+					"exitmenu": true
+				},
+				{
+					"name": "Start Daily (stop framework)",
+					"priority": 2,
+					"action": "/bin/sh",
+					"params": "/mnt/us/kmc/kpm/packages/daily/launch.sh --framework_stop",
+					"status": false,
+					"exitmenu": true
+				}
+			]
+		}
+	]
+}

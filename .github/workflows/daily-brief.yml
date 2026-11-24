@@ -1,4 +1,9 @@
-# Builds the Daily Brief every morning and publishes it to GitHub Pages.
+# Every morning: builds the Daily Brief (news, markets) and publishes it to
+# GitHub Pages together with the Kindle app's install packages.
+#
+#   https://<user>.github.io/<repo>/brief.json        today's edition
+#   https://<user>.github.io/<repo>/app/manifest.json  KPM repository for the app
+#   https://<user>.github.io/<repo>/app/daily-kindle.zip  USB install (KUAL)
 #
 # One-time setup: Settings -> Pages -> Build and deployment -> Source:
 # "GitHub Actions". Then run this workflow once from the Actions tab.
@@ -10,14 +15,60 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ["job/**", ".github/workflows/daily-brief.yml"]
+    paths: ["job/**", "app/**", ".github/workflows/daily-brief.yml"]
 
 concurrency:
   group: pages
   cancel-in-progress: false
 
 jobs:
+  app:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install LuaJIT
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q luajit libluajit-5.1-dev zip
+      - name: App tests (desktop emulator)
+        run: |
+          make -C native
+          luajit tests/run_tests.lua
+      # The Kindle binary only changes with the C sources or the build script.
+      - id: cache
+        uses: actions/cache@v4
+        with:
+          path: app/build/kindle/daily
+          key: kindle-bin-${{ hashFiles('app/native/*.c', 'app/tools/build_kindle.sh') }}
+      - name: Cross-compile the Kindle binary
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          python3 -m pip install -q ziglang==0.13.0
+          ZIG="python3 -m ziglang" tools/build_kindle.sh
+      - name: Run the app's code on the ARM binary (qemu)
+        if: github.event_name != 'schedule'
+        run: |
+          sudo apt-get install -y -q qemu-user
+          file build/kindle/daily | grep -q "ARM"
+          qemu-arm build/kindle/daily tests/arm_smoke.lua
+      - name: Package (KPM repository and USB zip)
+        run: |
+          VERSION="$(tr -d '\n' < VERSION)" tools/package_kpm.sh
+          tools/package_kindle.sh
+          cp build/daily-kindle.zip build/kpm-repo/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-site
+          path: app/build/kpm-repo
+          retention-days: 1
+
   build:
+    needs: app
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -44,6 +95,12 @@ jobs:
           python -W ignore -m daily.build --config config.yml --out ../site --report "$GITHUB_STEP_SUMMARY" \
             || { echo "Build failed; retrying in 60 s"; sleep 60; rm -rf ../site;
                  python -W ignore -m daily.build --config config.yml --out ../site --report "$GITHUB_STEP_SUMMARY"; }
+      - uses: actions/download-artifact@v4
+        with:
+          name: app-site
+          path: site/app
+      - name: Landing page
+        run: cp pages/index.html site/index.html
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

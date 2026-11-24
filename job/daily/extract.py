@@ -26,8 +26,8 @@ def extract(html, url, title=None):
     def norm(t):  # compare letters and digits only (quotes, NBSPs, punctuation differ)
         return re.sub(r"\W+", "", t).lower()
 
-    if paras and title and paras[0].startswith("#") and norm(paras[0]) == norm(title):
-        paras = paras[1:]
+    if title:  # a heading repeating the headline, near the top
+        paras = [p for i, p in enumerate(paras) if not (i < 4 and p.startswith("#") and norm(p) == norm(title))]
     paras = [p for p in paras if not (len(p) < 120 and _BOILERPLATE.match(p.lstrip("#-* ")))]
     text = "\n\n".join(paras)
     if len(text) < MIN_CHARS:

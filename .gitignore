@@ -2,3 +2,8 @@
 __pycache__/
 .pytest_cache/
 site/
+app/build/
+app/native/*.so
+app/tests/out/
+app/data/
+app/emu_out/
