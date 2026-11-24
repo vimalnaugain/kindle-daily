@@ -10,17 +10,25 @@ h1{margin-bottom:.2em}.sub{color:#555;margin-top:0}
 <h1>Daily</h1>
 <p class="sub">A morning dashboard for a jailbroken Kindle: top news by category, markets and weather.</p>
 
-<h2>Install with KPM</h2>
+<h2>Install over USB (easiest, no terminal)</h2>
+<ol>
+<li>Download <a href="app/daily-kindle.zip">daily-kindle.zip</a>.</li>
+<li>Connect the Kindle to your computer and unzip the file at the <b>root</b> of the Kindle drive
+(you get a <code>daily-install</code> folder and <code>documents/install-daily.sh</code>). Eject the Kindle.</li>
+<li>In your Kindle library, tap <b>Install Daily</b> once. A message at the bottom of the screen says when it's done.</li>
+<li>Open <b>Daily</b> from your library.</li>
+</ol>
+<p>To update later, repeat with the new zip.</p>
+
+<h2>Install with KPM (terminal)</h2>
+<p>kterm doesn't know the short <code>kpm</code> command, so use its full path:</p>
 <ol>
 <li>In the Kindle search bar: <code>;kpm install kterm</code>, then open kterm.</li>
-<li>In kterm, once: <code>kpm add-repo https://vimalnaugain.github.io/kindle-daily/app/manifest.json</code> then <code>kpm update</code></li>
-<li>In the search bar: <code>;kpm install daily</code>. Later updates: <code>;kpm upgrade</code></li>
+<li>In kterm: <code>/var/local/kmc/bin/kpm add-repo https://vimalnaugain.github.io/kindle-daily/app/manifest.json</code></li>
+<li>Then: <code>/var/local/kmc/bin/kpm update</code> and <code>/var/local/kmc/bin/kpm install daily</code></li>
 <li>Open <b>Daily</b> from your Kindle library.</li>
 </ol>
-
-<h2>Install over USB (KUAL)</h2>
-<p>Unzip <a href="app/daily-kindle.zip">daily-kindle.zip</a> at the root of the Kindle drive, eject,
-and start <b>Daily</b> from KUAL.</p>
+<p>If that path doesn't exist either, run <code>ls /var/local/kmc/bin /mnt/us/kmc/bin</code> in kterm to find <code>kpm</code>.</p>
 
 <h2>Today's edition</h2>
 <p><a href="brief.json">brief.json</a> · <a href="index.json">index.json</a> · built every morning at 05:17 IST.</p>

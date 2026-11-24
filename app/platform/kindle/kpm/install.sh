@@ -24,12 +24,16 @@ if [ ! -f "${HOME_DIR}/config.lua" ]; then
 fi
 
 cp -f "${SELF_DIR}/assets/daily-icon.png" "${ROOT}/daily-icon.png"
-cp -f "${SELF_DIR}/scriptlet/daily.sh" "${ROOT}/documents/Daily.sh"
+# The library item and KUAL entry point at wherever this copy lives: KPM's
+# package folder, or /mnt/us/daily-app for the USB installer.
+KPM_DIR=/mnt/us/kmc/kpm/packages/daily
+sed "s#${KPM_DIR}#${SELF_DIR}#g" "${SELF_DIR}/scriptlet/daily.sh" > "${ROOT}/documents/Daily.sh"
 chmod 755 "${ROOT}/documents/Daily.sh"
 
 if [ -d "${ROOT}/extensions" ]; then
     mkdir -p "${ROOT}/extensions/daily"
-    cp -f "${SELF_DIR}/kual/config.xml" "${SELF_DIR}/kual/menu.json" "${ROOT}/extensions/daily/"
+    cp -f "${SELF_DIR}/kual/config.xml" "${ROOT}/extensions/daily/"
+    sed "s#${KPM_DIR}#${SELF_DIR}#g" "${SELF_DIR}/kual/menu.json" > "${ROOT}/extensions/daily/menu.json"
 fi
 
 if [ "${1:-}" = "upgrade" ]; then

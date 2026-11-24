@@ -1,22 +1,19 @@
 #!/bin/sh
-# Assemble the Kindle install tree and zip it:
-#   daily/       -> copy to /mnt/us/daily
-#   extensions/  -> copy to /mnt/us/extensions (KUAL menu entry)
+# USB install without a terminal: build/daily-kindle.zip. Unzipped at the
+# root of the Kindle drive it gives:
+#   daily-install/                the app (same files as the KPM package)
+#   documents/install-daily.sh    "Install Daily" item in the library: tap it once
+# The installer moves the app to /mnt/us/daily-app and adds the "Daily"
+# library item (and a KUAL entry if KUAL is installed).
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-OUT="${ROOT}/build/package"
-BIN="${ROOT}/build/kindle/daily"
-[ -x "${BIN}" ] || { echo "missing ${BIN}; run tools/build_kindle.sh first" >&2; exit 1; }
-
-rm -rf "${OUT}"
-mkdir -p "${OUT}/daily" "${OUT}/extensions"
-cp "${BIN}" "${OUT}/daily/daily-luajit"
-cp "${ROOT}/main.lua" "${ROOT}/platform/kindle/daily.sh" "${OUT}/daily/"
-cp -r "${ROOT}/core" "${ROOT}/daily" "${ROOT}/fonts" "${OUT}/daily/"
-cp "${ROOT}/LICENSE.tome" "${OUT}/daily/"
-[ -f "${ROOT}/VERSION" ] && cp "${ROOT}/VERSION" "${OUT}/daily/"
-cp "${ROOT}/config.example.lua" "${OUT}/daily/config.example.lua"
-cp -r "${ROOT}/platform/kindle/extensions/daily" "${OUT}/extensions/"
-chmod +x "${OUT}/daily/daily-luajit" "${OUT}/daily/daily.sh"
-(cd "${OUT}" && zip -qr ../daily-kindle.zip daily extensions)
+STAGE="${ROOT}/build/kpm/stage"
+[ -x "${STAGE}/daily-luajit" ] || { echo "missing ${STAGE}; run tools/package_kpm.sh first" >&2; exit 1; }
+OUT="${ROOT}/build/usb"
+rm -rf "${OUT}" && mkdir -p "${OUT}/documents"
+cp -r "${STAGE}" "${OUT}/daily-install"
+cp "${ROOT}/platform/kindle/usb/install-daily.sh" "${OUT}/documents/install-daily.sh"
+chmod 755 "${OUT}/documents/install-daily.sh" "${OUT}/daily-install/daily-luajit" "${OUT}/daily-install/"*.sh
+rm -f "${ROOT}/build/daily-kindle.zip"
+(cd "${OUT}" && zip -qr ../daily-kindle.zip daily-install documents)
 echo "wrote ${ROOT}/build/daily-kindle.zip"

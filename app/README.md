@@ -15,9 +15,10 @@ offline. While the Kindle sleeps, the screen keeps showing today's dashboard.
 
 ## Install
 
-See the [landing page](https://vimalnaugain.github.io/kindle-daily/): KPM
-(`;kpm install daily` after adding the repository once) or a USB zip for
-KUAL. Settings live in `/mnt/us/daily/config.lua`; the **Menu** on the
+See the [landing page](https://vimalnaugain.github.io/kindle-daily/). The
+easiest way is the USB zip: unzip it at the root of the Kindle drive, then tap
+**Install Daily** in the library once. With KPM, use its full path in kterm
+(`/var/local/kmc/bin/kpm`), since kterm doesn't have `kpm` on its PATH. Settings live in `/mnt/us/daily/config.lua`; the **Menu** on the
 dashboard changes the city, article text size and auto-sleep.
 
 ## How it's built

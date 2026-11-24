@@ -7,7 +7,7 @@ if [ -f "${SCRIPTLET}" ] && grep -q '^# daily-managed-scriptlet-v1$' "${SCRIPTLE
     rm -f "${SCRIPTLET}"
 fi
 rm -f "${ROOT}/daily-icon.png"
-if [ -f "${ROOT}/extensions/daily/menu.json" ] && grep -q 'packages/daily/launch.sh' "${ROOT}/extensions/daily/menu.json"; then
+if [ -f "${ROOT}/extensions/daily/menu.json" ] && grep -q 'daily.*/launch.sh' "${ROOT}/extensions/daily/menu.json"; then
     rm -rf "${ROOT}/extensions/daily"
 fi
 echo "Daily removed. Your settings are still in ${ROOT}/daily."
