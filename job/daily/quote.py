@@ -48,11 +48,30 @@ def passages(text, lo=180, hi=560):
     return out
 
 
+_WISDOM = re.compile(r"\b(life|lives|love|truth|world|heart|soul|mind|happiness|happy|time|nature|man|men|"
+                     r"human|always|never|every|nothing|all|wisdom|virtue|death|hope|fear|freedom|beauty|"
+                     r"joy|sorrow|must|ought|should|great|true)\b", re.I)
+_NARRATIVE_START = re.compile(r"^(but|and|then|so|he|she|they|it|his|her|their|when|after|as)\b", re.I)
+
+
+def score(p):
+    """Higher for reflective, self-contained passages; lower for scenes and dialogue."""
+    s = len(_WISDOM.findall(p))
+    if re.search(r"[\"“”]", p):
+        s -= 4                       # dialogue
+    if _NARRATIVE_START.match(p):
+        s -= 2                       # continues a scene
+    s -= len(re.findall(r"\b(he|she|him|her|said|replied|cried)\b", p, re.I)) * 0.5
+    return s
+
+
 def pick(day, items):
+    """The day's passage among the most quotable ones."""
     if not items:
         return None
+    best = sorted(items, key=score, reverse=True)[:max(1, len(items) // 20)]
     h = int(hashlib.sha1(day.encode()).hexdigest(), 16)
-    return items[h % len(items)]
+    return best[h % len(best)]
 
 
 def of_the_day(fetcher, books, day):

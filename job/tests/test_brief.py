@@ -444,3 +444,20 @@ def test_build_with_reads_and_quote(tmp_path):
     build_mod.write_site(brief, tmp_path)
     assert json.loads((tmp_path / "reads" / "old1.json").read_text())["text"] == "Old text"
     assert len(list((tmp_path / "reads").iterdir())) == 3
+
+
+def test_quotable_passages_win():
+    from daily import quote
+    scene = "But she didn't say another word. We gave her spirits of ammonia and put ice on her forehead. Then he left."
+    talk = "“Come here,” he said. “We must go now, and you must come too,” she replied. He nodded."
+    wise = "Happiness is not a thing to be pursued for itself. All the great truths of life must be lived to be known. Every man knows this."
+    assert quote.score(wise) > quote.score(scene) > quote.score(talk)
+    assert quote.pick("2026-11-25", [scene, talk, wise]) == wise
+
+
+def test_lonely_headlines_are_dropped():
+    lonely = rank.Story(items=[mk("Live cricket scorecard", "Cricbuzz", kind="google", url="https://news.google.com/x")])
+    covered = rank.Story(items=[mk("Election results announced", "A", kind="google", url="https://news.google.com/y"),
+                                mk("Election results are announced", "B", kind="google", url="https://news.google.com/z")])
+    chosen = build_mod.choose([(lonely, None, "g"), (covered, None, "g")], 5, 2)
+    assert [r[0] for r in chosen] == [covered]

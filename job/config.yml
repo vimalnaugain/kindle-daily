@@ -17,7 +17,10 @@ edition:
   stories_per_category: 15   # the Kindle shows every story of the topics you pick
   max_per_source: 2          # keep the 5 stories from at least 3 outlets
   user_agent: "Mozilla/5.0 (compatible; daily-brief/1.0)"
-  blocked_sources: [The Motley Fool, Zacks, InvestorPlace, Benzinga, Yahoo Finance]
+  blocked_sources: [The Motley Fool, Zacks, InvestorPlace, Benzinga, Yahoo Finance, Cricbuzz, IPO Watch]
+  # pages that aren't news stories, in every topic
+  exclude: ["live score", "scorecard", "price band", "ipo date", "price forecast", "horoscope",
+            "lottery result", "schedule, latest news", "gold rate today", "petrol price today"]
 
 # News topics the Kindle can show. None is shown until you pick topics on
 # the Kindle (Menu > News topics); then every story of those topics shows.

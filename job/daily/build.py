@@ -119,12 +119,15 @@ def has_summary(story):
 
 def choose(rows, n, max_per_source):
     """rows: (story, text, why) in rank order. Prefer stories the reader can
-    actually read: full text, then a real summary, then headline only. Keeps
-    rank order among the chosen ones."""
+    actually read: full text, then a real summary, then headline only, and a
+    headline only when at least two outlets carry it. Keeps rank order among
+    the chosen ones."""
     tiers = [
         [r for r in rows if r[1]],
         [r for r in rows if not r[1] and has_summary(r[0])],
-        [r for r in rows if not r[1] and not has_summary(r[0])],
+        # headline only: a direct link, or a Google News story at least two outlets carry
+        [r for r in rows if not r[1] and not has_summary(r[0])
+         and (r[0].lead.kind != "google" or len(r[0].sources) >= 2)],
     ]
     chosen, per_source = [], {}
     for tier in tiers:
@@ -206,7 +209,7 @@ def build(config, fetcher, now=None, previous_site=None):
                 max_per_source=ed.get("max_per_source", 2), boost=cat.get("boost", ()),
                 elsewhere=elsewhere,  # topics are picked on the Kindle: no cross-topic exclusion
                 blocked_sources=ed.get("blocked_sources", ()),
-                exclude_patterns=cat.get("exclude", ()))
+                exclude_patterns=list(cat.get("exclude", ())) + list(ed.get("exclude", ())))
             pages = list(pool.map(lambda st: download_article(fetcher, st), candidates))
             texts = [fetch_article(fetcher, st, pg) for st, pg in zip(candidates, pages)]
             rows = [(st, *tx) for st, tx in zip(candidates, texts)]
