@@ -25,6 +25,30 @@ def tokens(title):
     return {w for w in words if len(w) > 2 and w not in STOPWORDS}
 
 
+# Capitalised words too common to identify a story on their own.
+GENERIC = set("""court high supreme police government govt minister chief president ceo city state
+india indian delhi new news live update updates report the a an and of in on at for to is are this
+what why how who when where after its his her their our you your can will day week year today
+tech ai market markets stock stocks share shares bank world people top best""".split())
+_NAME = re.compile(r"\b[A-Z][A-Za-z0-9'’.-]+")
+
+
+def names(title):
+    """Distinctive capitalised words (people, companies, places) in a headline."""
+    out = set()
+    for w in _NAME.findall(title):
+        w = re.sub(r"['’]s$", "", w).strip("'’.-").lower()  # Huang’s -> huang
+        if len(w) > 2 and w not in GENERIC and w not in STOPWORDS:
+            out.add(w)
+    return out
+
+
+def same_topic(a, b):
+    """Two headlines about the same event, worded differently (shared names)."""
+    shared = len(a & b)
+    return shared >= 2 and shared / max(1, min(len(a), len(b))) >= 0.4
+
+
 def similar(a, b):
     if not a or not b:
         return False
@@ -37,6 +61,7 @@ class Story:
     items: list
     tokens: set = field(default_factory=set)
     score: float = 0.0
+    names: set = field(default_factory=set)
     also: list = field(default_factory=list)  # outlets covering it in other categories' feeds
 
     @property
@@ -63,9 +88,10 @@ def cluster(items):
             if similar(t, s.tokens):
                 s.items.append(it)
                 s.tokens |= t
+                s.names |= names(it.title)
                 break
         else:
-            stories.append(Story(items=[it], tokens=set(t)))
+            stories.append(Story(items=[it], tokens=set(t), names=names(it.title)))
     return stories
 
 
@@ -79,14 +105,14 @@ def score(story, now, boost=()):
     s = 2.0 * math.log2(1 + coverage) + prominence + freshness + math.log10(1 + points) / 2
     title = " ".join(it.title.lower() for it in story.items)
     if story.lead.kind == "google":
-        s -= 0.5  # no direct link: we can only show the headline
+        s -= 1.25  # no direct link: we can only show the headline
     if boost and any(re.search(rf"\b{re.escape(b.lower())}\b", title) for b in boost):
         s += 0.75
     return s
 
 
 def pick(items, n, now=None, max_age_hours=36, max_per_source=2, boost=(), exclude_urls=(), exclude_tokens=(),
-         elsewhere=()):
+         elsewhere=(), exclude_topics=(), blocked_sources=(), exclude_patterns=()):
     """Top `n` stories from `items`, most important first.
 
     `elsewhere`: items from other categories' feeds. They never become stories
@@ -97,6 +123,13 @@ def pick(items, n, now=None, max_age_hours=36, max_per_source=2, boost=(), exclu
     def recent(it):
         return it.published is None or (now - it.published).total_seconds() <= max_age_hours * 3600
 
+    blocked = {b.lower() for b in blocked_sources}
+    pattern = re.compile("|".join(exclude_patterns), re.I) if exclude_patterns else None
+
+    def wanted(it):
+        return it.source.lower() not in blocked and not (pattern and pattern.search(it.title))
+
+    items = [it for it in items if wanted(it)]
     fresh = [it for it in items if recent(it)]
     stories = cluster(fresh)
     others = [(tokens(it.title), it.source) for it in elsewhere if recent(it)]
@@ -110,6 +143,8 @@ def pick(items, n, now=None, max_age_hours=36, max_per_source=2, boost=(), exclu
         lead = s.lead
         if lead.url in exclude_urls or any(similar(s.tokens, t) for t in exclude_tokens):
             continue  # already in an earlier category
+        if any(same_topic(s.names, t) for t in list(exclude_topics) + [c.names for c in chosen]):
+            continue  # same event as a story already picked, worded differently
         if per_source.get(lead.source, 0) >= max_per_source:
             continue
         per_source[lead.source] = per_source.get(lead.source, 0) + 1

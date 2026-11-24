@@ -65,12 +65,20 @@ def fetch_article(fetcher, story):
     lead = story.lead
     if lead.kind == "google":
         return None, "Google News link only"
+    text, err = None, None
     try:
         r = fetcher.get(lead.url, accept="text/html,application/xhtml+xml")
         html = r.body.decode("utf-8", errors="replace")
-        return extract_mod.extract(html, r.url, lead.title)
+        text, err = extract_mod.extract(html, r.url, lead.title)
     except Exception as e:
-        return None, str(e)[:120]
+        err = str(e)[:120]
+    if text is None and lead.extra.get("content_html"):
+        # The site blocked us (or the page was thin) but the feed carries the article.
+        page = f"<html><body><article>{lead.extra['content_html']}</article></body></html>"
+        text, err2 = extract_mod.extract(page, lead.url, lead.title)
+        if text:
+            err = None
+    return text, err
 
 
 def story_id(url):
@@ -118,17 +126,20 @@ def build(config, fetcher, now=None):
     results, status = fetch_feeds(fetcher, categories)
 
     log("Ranking")
-    picked, used_urls, used_tokens = [], set(), []
+    picked, used_urls, used_tokens, used_topics = [], set(), [], []
     by_cat = {c["id"]: [it for f in c["feeds"] for it in results.get((c["id"], f["name"]), [])] for c in categories}
     for cat in categories:
         items = by_cat[cat["id"]]
         elsewhere = [it for cid, its in by_cat.items() if cid != cat["id"] for it in its]
         stories = rank.pick(items, n, now=now, max_age_hours=cat.get("max_age_hours", 36),
                             max_per_source=ed.get("max_per_source", 2), boost=cat.get("boost", ()),
-                            exclude_urls=used_urls, exclude_tokens=used_tokens, elsewhere=elsewhere)
+                            exclude_urls=used_urls, exclude_tokens=used_tokens, elsewhere=elsewhere,
+                            exclude_topics=used_topics, blocked_sources=ed.get("blocked_sources", ()),
+                            exclude_patterns=cat.get("exclude", ()))
         for s in stories:
             used_urls.add(s.lead.url)
             used_tokens.append(s.tokens)
+            used_topics.append(s.names)
         picked.append((cat, stories))
         log(f"  {cat['id']:15} {len(items):4} items -> {len(stories)} stories")
 

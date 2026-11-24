@@ -17,10 +17,12 @@ edition:
   stories_per_category: 5
   max_per_source: 2          # keep the 5 stories from at least 3 outlets
   user_agent: "Mozilla/5.0 (compatible; daily-brief/1.0)"
+  blocked_sources: [The Motley Fool, Zacks, InvestorPlace, Benzinga, Yahoo Finance]
 
 categories:
   - id: ai
     title: New in AI
+    exclude: ["stocks? to buy", "buy before", "price prediction"]   # skip investing clickbait
     feeds:
       - { type: google_news, name: Google News, url: "https://news.google.com/rss/search?q=%22artificial+intelligence%22+OR+%22AI+model%22+when:1d&hl=en-IN&gl=IN&ceid=IN:en" }
       - { type: rss, name: TechCrunch, url: "https://techcrunch.com/category/artificial-intelligence/feed/" }

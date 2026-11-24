@@ -240,3 +240,57 @@ def test_real_config_is_valid():
             assert f["type"] in ("rss", "google_news", "hn") and f["name"]
             assert f["type"] == "hn" or f["url"].startswith("https://")
     assert len(cfg["markets"]["universe"]) == 50
+
+
+# Regressions from the first live run (2026-11-24) ------------------------------
+
+def test_same_event_with_different_headlines_is_picked_once():
+    items = [
+        mk("Nvidia CEO Jensen Huang is back. What happens next?", "The Verge", pos=0),
+        mk("Tech leaders are celebrating Jensen Huang’s return", "The Verge", pos=1),
+        mk("OpenAI ships a new reasoning model for developers", "TechCrunch", pos=2),
+    ]
+    picked = rank.pick(items, 5, now=NOW)
+    assert [s.lead.title for s in picked] == [
+        "Nvidia CEO Jensen Huang is back. What happens next?",
+        "OpenAI ships a new reasoning model for developers"]
+    # …and the same event is not repeated in a later category.
+    world = [mk("Asia markets rally as Huang’s return to Nvidia reignites AI trade", "The Guardian"),
+             mk("Sheikh Hasina plans to return to Bangladesh from exile", "Al Jazeera")]
+    again = rank.pick(world, 5, now=NOW, exclude_topics=[picked[0].names])
+    assert [s.lead.source for s in again] == ["Al Jazeera"]
+
+
+def test_unrelated_delhi_stories_are_not_merged_as_one_topic():
+    items = [mk("Delhi High Court grants bail to PG operator", "The Hindu"),
+             mk("Delhi High Court orders survey of Yamuna floodplain", "NDTV")]
+    assert len(rank.pick(items, 5, now=NOW)) == 2
+
+
+def test_blocked_sources_and_clickbait_patterns():
+    items = [mk("Nvidia news: here is my top stock to buy before it is too late", "Big Blog"),
+             mk("Model release notes from a research lab", "The Motley Fool"),
+             mk("Anthropic publishes new interpretability research paper", "MIT Technology Review")]
+    picked = rank.pick(items, 5, now=NOW, blocked_sources=["the motley fool"], exclude_patterns=["stocks? to buy"])
+    assert [s.lead.source for s in picked] == ["MIT Technology Review"]
+
+
+def test_google_only_stories_rank_below_readable_ones():
+    items = [mk("Court stops activist at airport before UK trip", "The Hindu", kind="google", url="https://news.google.com/1"),
+             mk("Court stops activist at airport ahead of UK trip", "NDTV", kind="google", url="https://news.google.com/2"),
+             mk("Metro fares to rise from next month", "Hindustan Times")]
+    assert rank.pick(items, 1, now=NOW)[0].lead.source == "Hindustan Times"
+
+
+def test_full_text_from_the_feed_when_the_site_blocks_us():
+    body = "".join(f"<p>Paragraph {i}: designers debated whether the field is about people or technology.</p>" for i in range(30))
+    feed = (f'<?xml version="1.0"?><rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/"><channel>'
+            f"<item><title>Is product design a people industry?</title><link>https://uxdesign.cc/a</link>"
+            f"<pubDate>{format_datetime(NOW)}</pubDate><description>Short teaser</description>"
+            f"<content:encoded><![CDATA[{body}]]></content:encoded></item></channel></rss>").encode()
+    [it] = feeds.parse(feed, {"type": "rss", "name": "UX Collective"})
+    assert "content_html" in it.extra
+    story = rank.Story(items=[it])
+    web = FakeWeb({"https://uxdesign.cc/a": FetchError("HTTP 403")})
+    text, err = build_mod.fetch_article(web, story)
+    assert err is None and "Paragraph 29" in text

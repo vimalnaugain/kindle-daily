@@ -79,10 +79,16 @@ def parse_rss(body, feed):
             source = outlet or "Google News"
         else:
             summary = clean_text(e.get("summary", "") or e.get("description", ""), 320)
+        extra = {}
+        content = e.get("content") or []
+        body = max((c.get("value", "") for c in content), key=len, default="")
+        if len(body) > 1500:
+            extra["content_html"] = body  # full article in the feed (Medium, WordPress…)
         items.append(Item(
             title=title, url=link, source=source, feed=feed["name"],
             kind="google" if google else "direct", position=pos,
             weight=float(feed.get("weight", 1.0)), published=_published(e), summary=summary,
+            extra=extra,
         ))
     return items
 
