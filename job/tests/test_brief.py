@@ -305,3 +305,10 @@ def test_unreadable_candidates_are_replaced():
     chosen = build_mod.choose(rows, 2, max_per_source=2)
     assert [r[0] for r in chosen] == [c, d]  # readable first, then a real summary; rank order kept
     assert len(build_mod.choose(rows, 4, 2)) == 4  # falls back to headline-only when short
+
+
+def test_headline_with_different_quotes_is_not_repeated():
+    page = article("Court rejects bail plea of PG operator", 10).decode().replace(
+        "<h1>Court rejects bail plea of PG operator</h1>", "<h2>Court rejects bail plea of PG\u00a0operator</h2>")
+    text, _ = extract.extract(page, "https://a/3", "Court rejects bail plea of PG operator")
+    assert not text.startswith("#")

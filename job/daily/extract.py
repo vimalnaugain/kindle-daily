@@ -23,7 +23,10 @@ def extract(html, url, title=None):
         return None, "no article text found"
     paras = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
     # Drop a leading heading that repeats the headline, and promo lines.
-    if paras and title and paras[0].lstrip("# ").strip().lower() == title.strip().lower():
+    def norm(t):  # compare letters and digits only (quotes, NBSPs, punctuation differ)
+        return re.sub(r"\W+", "", t).lower()
+
+    if paras and title and paras[0].startswith("#") and norm(paras[0]) == norm(title):
         paras = paras[1:]
     paras = [p for p in paras if not (len(p) < 120 and _BOILERPLATE.match(p.lstrip("#-* ")))]
     text = "\n\n".join(paras)
