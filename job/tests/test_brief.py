@@ -336,3 +336,12 @@ def test_wikipedia_featured_article(tmp_path):
     assert art["minutes"] >= 1 and not art["summary_only"]
     art, err = wiki.featured(FakeWeb({}), date(2026, 11, 25))
     assert art is None and err
+
+
+def test_broken_wikipedia_lead_is_rejoined():
+    paras = ["The **great white shark** (* Carcharodon carcharias*), also known as the",
+             "**white shark, white pointer**, or", "**great white**, is a large shark.", "## Taxonomy", "Next."]
+    out = extract.join_broken(paras)
+    assert out[0] == ("The **great white shark** (*Carcharodon carcharias*), also known as the "
+                      "**white shark, white pointer**, or **great white**, is a large shark.")
+    assert out[1:] == ["## Taxonomy", "Next."]

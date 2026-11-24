@@ -34,9 +34,9 @@ Kindle talks to those services directly.
 |---|---|---|
 | 1 | Morning news job (`job/`) | **built** |
 | 2 | Kindle app (`app/`): dashboard, weather, markets, news, reading articles | **built** |
-| 3 | To-do list and Telegram bot | next |
-| 4 | Google Calendar | |
-| 5 | Phone setup page, polish | |
+| 3 | To-do list and Telegram bot | **built** |
+| 4 | Google Calendar | **built** |
+| 5 | Phone setup page, polish | next |
 
 ## The morning job
 

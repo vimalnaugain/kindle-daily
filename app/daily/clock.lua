@@ -54,6 +54,40 @@ local function days_from_civil(y, m, d)
     return era * 146097 + doe - 719468
 end
 
+Clock.days_from_civil = days_from_civil
+
+--- Days since 1970-01-01 -> y, m, d
+function Clock.civil_from_days(z)
+    z = z + 719468
+    local era = math.floor(z / 146097)
+    local doe = z - era * 146097
+    local yoe = math.floor((doe - math.floor(doe / 1460) + math.floor(doe / 36524) - math.floor(doe / 146096)) / 365)
+    local y = yoe + era * 400
+    local doy = doe - (365 * yoe + math.floor(yoe / 4) - math.floor(yoe / 100))
+    local mp = math.floor((5 * doy + 2) / 153)
+    local d = doy - math.floor((153 * mp + 2) / 5) + 1
+    local m = mp < 10 and mp + 3 or mp - 9
+    return (m <= 2) and y + 1 or y, m, d
+end
+
+--- Local day number (days since 1970-01-01 in local time) of epoch t.
+function Clock:day(t) return math.floor(((t or self:now()) + self.offset) / 86400) end
+
+--- Epoch of local midnight starting local day number `day`.
+function Clock:day_start(day) return day * 86400 - self.offset end
+
+--- 12-hour time: "12:21", "PM"
+function Clock:hm12(t)
+    local p = self:parts(t)
+    local h = p.hour % 12
+    if h == 0 then h = 12 end
+    return string.format("%d:%02d", h, p.min), p.hour < 12 and "AM" or "PM"
+end
+
+function Clock.days_in_month(y, m)
+    return days_from_civil(m == 12 and y + 1 or y, m == 12 and 1 or m + 1, 1) - days_from_civil(y, m, 1)
+end
+
 --- "2026-11-24T08:59:50Z" (UTC) -> epoch. "2026-11-24T14:00" (no zone) is
 -- taken as local time (Open-Meteo with a timezone parameter).
 function Clock:parse_iso(s)

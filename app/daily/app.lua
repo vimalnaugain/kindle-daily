@@ -12,6 +12,7 @@ local log = require("core.log")
 local Clock = require("daily.clock")
 local Data = require("daily.data")
 local Weather = require("daily.weather")
+local Todo = require("daily.todo")
 
 local App = {}
 App.__index = App
@@ -46,6 +47,10 @@ function App.new(opts)
     if self.settings.rotation and self.settings.rotation ~= 0 then self.ui:set_rotation(self.settings.rotation) end
     self.http = Http.new({ curl = cfg.curl, ca_bundle = cfg.ca_bundle, tmp_dir = cfg.tmp_dir or "/tmp",
         user_agent = "Daily/" .. self.version })
+    self.todo = Todo.new(self.data_dir .. "/todo.lua", self.clock)
+    if type(cfg.telegram_token) == "string" and cfg.telegram_token:match("^%d+:[%w_-]+$") then
+        self.telegram = require("daily.telegram").new(self, cfg.telegram_token)
+    end
     self.data = Data.new(self)
     self:_setup_power()
     return self
@@ -105,6 +110,104 @@ function App:markets_text()
 end
 
 function App:show_markets() self:show_text("Markets", self:markets_text()) end
+
+function App:open_article_of_the_day()
+    local a = self.data.brief and self.data.brief.article
+    if not a then return end
+    local cat = { title = "Article of the day", stories = { a } }
+    self.ui:show(require("daily.article").new(self, cat, 1))
+end
+
+--- Full to-do list: tap to tick off, long-press to delete.
+function App:show_todo()
+    local view
+    local function build()
+        local rows = {}
+        for _, it in ipairs(self.todo:open()) do
+            rows[#rows + 1] = { text = "\u{2610}  " .. it.text, subtext = self.todo:due_label(it),
+                callback = function() self.todo:set_done(it, true); view:set_items(build()) end }
+        end
+        for _, it in ipairs(self.todo:recently_done()) do
+            rows[#rows + 1] = { text = "\u{2611}  " .. it.text, subtext = "done",
+                callback = function() self.todo:set_done(it, false); view:set_items(build()) end }
+        end
+        if #rows == 0 then
+            rows[1] = { text = self.telegram and "Nothing to do. Message your bot to add items."
+                or "Add telegram_token to config.lua to send to-dos from your phone.", callback = function() end }
+        end
+        return rows
+    end
+    view = self.ui:show(W.ListView.new({ title = "To-do", items = build() }))
+    view.on_close = function() if self.dashboard then self.ui:set_dirty("full") end end
+end
+
+function App:agenda_text()
+    if not self.data.calendar_configured then
+        return "## Google Calendar\n\nIn Google Calendar on a computer: Settings > your calendar > "
+            .. "**Secret address in iCal format**. Copy it into /mnt/us/daily/config.lua:\n\n"
+            .. "calendar_url = \"https://calendar.google.com/calendar/ical/…/basic.ics\""
+    end
+    local out, last_day = {}, nil
+    local now = self.clock:now()
+    for _, o in ipairs(self.data.calendar or {}) do
+        if o.finish > now or (o.all_day and self.clock:day(o.start) >= self.clock:day()) then
+            local d = self.clock:day(o.start)
+            if d ~= last_day then
+                if #out > 40 then break end
+                local t = self.clock:day_start(d) + 43200
+                local label = d == self.clock:day() and "Today" or (d == self.clock:day() + 1 and "Tomorrow")
+                    or (self.clock:weekday(t) .. ", " .. self.clock:day_month(t))
+                out[#out + 1] = "## " .. label
+                last_day = d
+            end
+            local when = "All day"
+            if not o.all_day then
+                local a, ap = self.clock:hm12(o.start)
+                local b, bp = self.clock:hm12(o.finish)
+                when = a .. (ap ~= bp and (" " .. ap) or "") .. " \u{2013} " .. b .. " " .. bp
+            end
+            out[#out + 1] = "- **" .. when .. "**  " .. o.title
+        end
+    end
+    if #out == 0 then return "Nothing in the next six weeks." end
+    return table.concat(out, "\n")
+end
+
+function App:show_agenda() self:show_text("Calendar", self:agenda_text()) end
+
+------------------------------------------------------------------------------
+-- Telegram
+------------------------------------------------------------------------------
+
+--- Inside a task: fetch and apply new Telegram messages.
+function App:poll_telegram_now()
+    if not self.telegram or self.telegram_busy then return 0 end
+    self.telegram_busy = true
+    local n, err = self.telegram:poll()
+    self.telegram_busy = false
+    if n and n > 0 then self.ui:set_dirty("partial") end
+    local p = self.telegram.pending
+    if p and not self.pairing_shown then
+        self.pairing_shown = true
+        self.ui:show(W.Dialog.new({ title = "Pair with Telegram?",
+            text = string.format("%s messaged your bot: \"%s\"\n\nPair this chat? Only it will be able to change your to-do list.",
+                p.name, p.text:sub(1, 60)),
+            buttons = {
+                { text = "Not now", callback = function() self.telegram.pending = nil; self.pairing_shown = false end },
+                { text = "Pair", primary = true, callback = function()
+                    self.telegram.pending = nil
+                    self.pairing_shown = false
+                    self.ui:spawn(function() self.telegram:pair(p); self.ui:set_dirty("partial") end)
+                end },
+            } }))
+    end
+    return n, err
+end
+
+function App:poll_telegram()
+    if not self.telegram or self.data.refreshing then return end
+    self.ui:spawn(function() self:poll_telegram_now() end, function(err) log.warn("telegram:", err) end)
+end
 
 function App:show_weather()
     self:show_text("Weather", Weather.details(self.data.weather, self:city().name))
@@ -209,7 +312,10 @@ function App:_tick()
     if self.ui:top() == self.dashboard then self.ui:set_dirty("partial") end
     if not self.data.refreshing and (not self.data.last_attempt or now - self.data.last_attempt >= 30 * 60) then
         self:refresh(false)
+    elseif self.telegram and math.floor(now / 60) % 2 == 0 then
+        self:poll_telegram() -- to-dos from your phone, every 2 minutes
     end
+    if math.floor(now / 60) % 60 == 0 then self.todo:tidy() end
 end
 
 ------------------------------------------------------------------------------

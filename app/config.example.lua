@@ -11,6 +11,20 @@ return {
     timezone = "Asia/Kolkata",
     utc_offset_minutes = 330,   -- India: UTC+5:30
 
+    -- To-do list from your phone: create a bot by messaging @BotFather in
+    -- Telegram (/newbot), paste its token here, then send your bot any
+    -- message and confirm the pairing on the Kindle.
+    -- telegram_token = "123456789:ABC...",
+
+    -- Google Calendar: on a computer, Google Calendar > Settings > your
+    -- calendar > "Secret address in iCal format". Several calendars:
+    -- calendar_urls = { "https://…/basic.ics", "https://…/basic.ics" }
+    -- calendar_url = "https://calendar.google.com/calendar/ical/…/basic.ics",
+
+    -- The "DAY" progress bar on the clock card runs between these hours.
+    day_starts_at = 7,
+    day_ends_at = 23,
+
     -- Minutes without a tap before the Kindle sleeps (0 = never).
     -- While asleep, the screen keeps showing today's dashboard.
     sleep_after_minutes = 10,

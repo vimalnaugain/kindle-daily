@@ -133,35 +133,135 @@ test("app: menu, markets, weather and the sleep screen", function()
     end
 end)
 
-test("dashboard and articles draw on every Kindle size and orientation", function()
+test("dashboard cards fit every Kindle size and orientation", function()
     local App = require("daily.app")
     local Canvas = require("core.canvas")
     for _, size in ipairs({ { 600, 800, 167 }, { 758, 1024, 212 }, { 1072, 1448, 300 }, { 1236, 1648, 300 },
-                            { 1264, 1680, 300 }, { 1448, 1072, 300 } }) do
-        local home = make_home("size", { emulator = { screen_width = size[1], screen_height = size[2], dpi = size[3] } })
-        -- reuse the cached edition from the end-to-end test
+                            { 1264, 1680, 300 }, { 1448, 1072, 300 }, { 1024, 758, 212 } }) do
+        local home = make_home("size", { emulator = { screen_width = size[1], screen_height = size[2], dpi = size[3] },
+            calendar_url = "file://" .. FIX .. "/calendar.ics" })
         os.execute(string.format("cp %s/e2e/data/brief.json %s/e2e/data/weather.lua %s/data/ 2>/dev/null", OUT, OUT, home))
         local cfg = util.load_table(home .. "/config.lua")
         cfg.data_dir = home .. "/data"
         local app = App.new({ root = root, home = home, device = "emulator", config = cfg })
+        app.data:refresh_calendar(true)
+        for i = 1, 9 do app.todo:add("Item number " .. i .. " with a fairly long description") end
         local dash = require("daily.dashboard").new(app)
         dash.ui = app.ui
         local c = Canvas.new(size[1], size[2])
         dash:draw(c)
-        assert(#(dash.targets.stories or {}) == 5, "five stories at " .. size[1] .. "x" .. size[2])
-        for i, r in ipairs(dash.targets.stories) do
-            assert(r.y + r.h <= size[2], "story " .. i .. " fits")
-        end
-        for ci, cat in ipairs(app.data.brief.categories) do
-            for si = 1, #cat.stories do
-                local art = require("daily.article").new(app, cat, si)
-                art.ui = app.ui
-                art:draw(c)
-                assert(#art.pages >= 2, "article has pages")
+        local tag = size[1] .. "x" .. size[2]
+        local names = {}
+        for name, r in pairs(dash.cards) do
+            if name ~= "footer" then
+                names[#names + 1] = name
+                assert(r.x >= 0 and r.y >= 0 and r.x + r.w <= size[1] and r.y + r.h <= size[2], name .. " inside at " .. tag)
             end
-            if ci > 1 then break end
+        end
+        assert(#names == 7, "seven cards")
+        for i = 1, #names do
+            for j = i + 1, #names do
+                local a, b = dash.cards[names[i]], dash.cards[names[j]]
+                local overlap = a.x < b.x + b.w and b.x < a.x + a.w and a.y < b.y + b.h and b.y < a.y + a.h
+                assert(not overlap, names[i] .. " overlaps " .. names[j] .. " at " .. tag)
+            end
+        end
+        assert(#dash.targets > 10, "tap targets at " .. tag)
+        util.write_file(OUT .. "/size-" .. tag .. ".png", c:to_png())
+        -- every story and the article of the day open and paginate
+        local cat = app.data.brief.categories[1]
+        for si = 1, #cat.stories do
+            local art = require("daily.article").new(app, cat, si)
+            art.ui = app.ui
+            art:draw(c)
+            assert(#art.pages >= 2, "article has pages")
         end
     end
+end)
+
+test("calendar: repeats, exceptions, moved and cancelled events, time zones", function()
+    local Cal = require("daily.calendar")
+    local c = Clock.new(330, function() return NOW end)
+    local p = Cal.parse(util.read_file(FIX .. "/calendar.ics"), c.offset)
+    local occ = Cal.occurrences(p, c, c:day(), c:day() + 20)
+    local function find(title, day_offset)
+        for _, o in ipairs(occ) do
+            if o.title == title and c:day(o.start) == c:day() + day_offset then return o end
+        end
+    end
+    eq(c:hm(find("Design review, Q4", 0).start), "16:30", "escaped comma, local TZID")
+    eq(c:hm(find("Standup", 0).start), "09:00", "UTC time")
+    eq(find("Standup", 2), nil, "EXDATE")
+    eq(c:hm(find("Standup (moved)", 3).start), "09:30", "moved occurrence")
+    eq(find("Standup", 3), nil, "original of the moved occurrence")
+    eq(find("Standup", 4), nil, "no standup on Saturday")
+    assert(find("Mom's birthday", 1).all_day, "yearly all-day")
+    assert(find("Evening walk", 7), "daily since 2015")
+    eq(c:day_month(find("Book club", 14).start), "8 December", "2nd Tuesday")
+    eq(c:hm(find("Call with NY", 0).start), "19:30", "other time zone")
+    for _, o in ipairs(occ) do assert(o.title ~= "Cancelled thing", "cancelled event shown") end
+end)
+
+test("to-do: commands, due days, undo", function()
+    local c = Clock.new(330, function() return NOW end)
+    local path = OUT .. "/todo-test.lua"
+    os.remove(path)
+    local t = require("daily.todo").new(path, c)
+    eq(t:command("buy milk"), "Added: buy milk (1 open)")
+    eq(t:command("add call bank tomorrow"), "Added: call bank, tomorrow (2 open)")
+    eq(t:command("/todo renew passport fri"), "Added: renew passport, Fri 27 (3 open)")
+    assert(t:command("list"):find("2. call bank (tomorrow)", 1, true))
+    assert(t:command("done 1"):find("buy milk", 1, true))
+    eq(#t:open(), 2)
+    assert(t:command("done passport"))
+    eq(#t:open(), 1)
+    t:command("undo")
+    eq(#t:open(), 2, "undo re-opens")
+    eq(t:command("del 9"), "Which one? Send `list` for the numbers.")
+    assert(t:command("help"):find("done 2", 1, true))
+    eq(t:command("clear done"), "Cleared 1 item.")
+    -- saved and reloaded
+    local t2 = require("daily.todo").new(path, c)
+    eq(#t2:open(), 2)
+end)
+
+test("telegram: pairing, commands, replies, ignores strangers", function()
+    local Telegram = require("daily.telegram")
+    local c = Clock.new(330, function() return NOW end)
+    local path = OUT .. "/todo-tg.lua"
+    os.remove(path)
+    local sent, updates = {}, {}
+    local app = { config = {}, todo = require("daily.todo").new(path, c) }
+    app.http = { request = function(_, req)
+        if req.url:find("getUpdates", 1, true) then
+            local off = tonumber(req.url:match("offset=(%d+)") or 0)
+            local res = {}
+            for _, u in ipairs(updates) do if u.update_id >= off then res[#res + 1] = u end end
+            return { status = 200, json = { ok = true, result = res }, body = "" }
+        end
+        sent[#sent + 1] = req.body
+        return { status = 200, json = { ok = true }, body = "" }
+    end }
+    local tg = Telegram.new(app, "123:abc")
+    local function msg(id, chat, text) updates[#updates + 1] = { update_id = id,
+        message = { text = text, chat = { id = chat }, from = { username = "vimal" } } } end
+    msg(1, 42, "/start")
+    tg:poll()
+    assert(tg.pending and tg.pending.chat_id == 42 and tg.pending.name == "@vimal", "pairing request")
+    eq(#sent, 0, "nothing sent before pairing")
+    tg:pair(tg.pending)
+    eq(app.todo.telegram.chat_id, 42)
+    assert(sent[1].text:find("Paired", 1, true))
+    msg(2, 42, "buy milk")
+    msg(3, 99, "add spam")
+    msg(4, 42, "list")
+    eq(tg:poll(), 2)
+    eq(#app.todo:open(), 1, "stranger ignored")
+    eq(sent[2].chat_id, 42)
+    eq(sent[2].text, "Added: buy milk (1 open)")
+    assert(sent[3].text:find("1. buy milk", 1, true))
+    eq(app.todo.telegram.offset, 5, "acknowledged")
+    eq(tg:poll(), 0, "no repeats")
 end)
 
 print(string.format("\n%d passed, %d failed", passed, failed))

@@ -12,6 +12,7 @@ local json = require("core.json")
 local log = require("core.log")
 local UI = require("core.ui.manager")
 local Weather = require("daily.weather")
+local Cal = require("daily.calendar")
 
 local Data = {}
 Data.__index = Data
@@ -45,6 +46,10 @@ function Data.new(app)
     self.brief = self:_load_brief()
     local w = util.load_table(self.weather_path)
     if w and w.data then self.weather, self.weather_at = w.data, w.at end
+    self.calendar_path = self.dir .. "/calendar.lua"
+    self.calendar_configured = #self:calendar_urls() > 0
+    local cal = util.load_table(self.calendar_path)
+    if cal and self.calendar_configured then self.calendar, self.calendar_at = cal.events, cal.at end
     return self
 end
 
@@ -118,6 +123,41 @@ function Data:refresh_weather(force)
     return "updated"
 end
 
+function Data:calendar_urls()
+    local c = self.app.config.calendar_urls or self.app.config.calendar_url
+    if type(c) == "string" then c = { c } end
+    local out = {}
+    for _, u in ipairs(c or {}) do
+        if type(u) == "string" and u ~= "" then out[#out + 1] = (u:gsub("^webcal://", "https://")) end
+    end
+    return out
+end
+
+--- Download the calendars (hourly) and work out the next six weeks' events.
+function Data:refresh_calendar(force)
+    local urls = self:calendar_urls()
+    if #urls == 0 then return "unchanged" end
+    local clock = self.app.clock
+    if not force and self.calendar_at and clock:now() - self.calendar_at < 3600
+        and clock:day(self.calendar_at) == clock:day() then
+        return "unchanged"
+    end
+    local today = clock:day()
+    local events = {}
+    for _, url in ipairs(urls) do
+        local res, err = self.app.http:request({ url = url, method = "GET", timeout = 90 })
+        if not res then return nil, err end
+        if res.status ~= 200 and res.status ~= 0 then return nil, "calendar: HTTP " .. res.status end
+        if not res.body:find("BEGIN:VCALENDAR", 1, true) then return nil, "calendar: not an iCal file" end
+        local parsed = Cal.parse(res.body, clock.offset)
+        for _, o in ipairs(Cal.occurrences(parsed, clock, today - 1, today + 41)) do events[#events + 1] = o end
+    end
+    table.sort(events, function(a, b) return a.start < b.start end)
+    self.calendar, self.calendar_at = events, clock:now()
+    util.save_table(self.calendar_path, { events = events, at = self.calendar_at })
+    return "updated"
+end
+
 local function is_network_error(err)
     return type(err) == "string" and (err:find("network error", 1, true) or err:find("curl exit", 1, true)) ~= nil
 end
@@ -130,8 +170,13 @@ function Data:refresh(force)
     local function run()
         local b, berr = self:refresh_brief(force)
         local w, werr = self:refresh_weather(force)
-        results = { brief = b, brief_err = berr, weather = w, weather_err = werr }
-        return (b or w) ~= nil, berr or werr
+        local c, cerr = self:refresh_calendar(force)
+        results = { brief = b, brief_err = berr, weather = w, weather_err = werr, calendar = c, calendar_err = cerr }
+        if self.app.telegram then
+            local n, terr = self.app:poll_telegram_now()
+            results.telegram, results.telegram_err = n, terr
+        end
+        return (b or w or c) ~= nil, berr or werr or cerr
     end
     local any, err = run()
     if not any and is_network_error(err) and self.app.device.is_kindle then
@@ -153,6 +198,8 @@ function Data:refresh(force)
     end
     if results.brief_err then log.warn("brief:", results.brief_err) end
     if results.weather_err then log.warn("weather:", results.weather_err) end
+    if results.calendar_err then log.warn("calendar:", results.calendar_err) end
+    if results.telegram_err then log.warn("telegram:", results.telegram_err) end
     return results
 end
 
