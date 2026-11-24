@@ -46,6 +46,10 @@ function Data.new(app)
     self.brief = self:_load_brief()
     local w = util.load_table(self.weather_path)
     if w and w.data then self.weather, self.weather_at = w.data, w.at end
+    util.mkdir_p(self.dir .. "/news")
+    util.mkdir_p(self.dir .. "/reads")
+    self.read_path = self.dir .. "/read.lua"
+    self.read = util.load_table(self.read_path) or {} -- long reads you've marked read: id -> time
     self.calendar_path = self.dir .. "/calendar.lua"
     self.calendar_configured = #self:calendar_urls() > 0
     local cal = util.load_table(self.calendar_path)
@@ -100,6 +104,117 @@ function Data:refresh_brief(force)
     self.brief = brief
     log.info("new edition", brief.date, brief.version)
     return "updated"
+end
+
+------------------------------------------------------------------------------
+-- Full texts: news for the topics you picked, long reads you haven't read
+------------------------------------------------------------------------------
+
+--- Topics you picked (Menu > News topics), in the edition's order.
+function Data:topics()
+    local picked = {}
+    for _, id in ipairs(self.app.settings.topics or {}) do picked[id] = true end
+    local out = {}
+    for _, c in ipairs(self.brief and self.brief.categories or {}) do
+        if picked[c.id] then out[#out + 1] = c end
+    end
+    return out
+end
+
+--- Stories of the picked topics, without repeats, best first per topic.
+function Data:news()
+    local out, seen = {}, {}
+    for _, c in ipairs(self:topics()) do
+        for _, s in ipairs(c.stories or {}) do
+            local key = s.id or s.url
+            if not seen[key] then
+                seen[key] = true
+                s.topic = c.short or c.title
+                s.topic_id = c.id
+                out[#out + 1] = s
+            end
+        end
+    end
+    return out
+end
+
+function Data:_news_path(cat_id) return self.dir .. "/news/" .. cat_id .. ".json" end
+function Data:_read_path(id) return self.dir .. "/reads/" .. id .. ".json" end
+
+--- The full text of a story or long read, from the cache (nil if not downloaded).
+function Data:text_of(item)
+    if not item then return nil end
+    if item.text then return item.text end
+    if item.topic_id then
+        local cache = self.news_cache or {}
+        self.news_cache = cache
+        local c = cache[item.topic_id]
+        if not c then
+            local raw = util.read_file(self:_news_path(item.topic_id))
+            local ok, j = pcall(json.decode, raw or "")
+            c = ok and type(j) == "table" and j.texts or {}
+            cache[item.topic_id] = c
+        end
+        return type(c[item.id]) == "string" and c[item.id] or nil
+    end
+    local raw = util.read_file(self:_read_path(item.id))
+    local ok, j = pcall(json.decode, raw or "")
+    return ok and type(j) == "table" and type(j.text) == "string" and j.text or nil
+end
+
+function Data:is_read(r) return self.read[r.id] ~= nil end
+
+function Data:set_read(r, read)
+    self.read[r.id] = read and self.app.clock:now() or nil
+    util.save_table(self.read_path, self.read)
+end
+
+--- Long reads you haven't read, newest first; and how many you have.
+function Data:unread()
+    local out = {}
+    for _, r in ipairs(self.brief and self.brief.reads or {}) do
+        if not self:is_read(r) then out[#out + 1] = r end
+    end
+    return out
+end
+
+--- Download the texts we don't have yet: picked topics (when the edition or
+-- the topics changed) and unread long reads. Inside a task.
+function Data:fetch_texts()
+    if not self.brief then return end
+    local base = self:base_url()
+    local version = self.brief.version or ""
+    self.state.news_texts = self.state.news_texts or {}
+    for _, c in ipairs(self:topics()) do
+        if self.state.news_texts[c.id] ~= version or not util.file_exists(self:_news_path(c.id)) then
+            local _, err, raw = self:_get_json(base .. "news/" .. c.id .. ".json", 90)
+            if raw then
+                util.write_file(self:_news_path(c.id), raw)
+                self.state.news_texts[c.id] = version
+                if self.news_cache then self.news_cache[c.id] = nil end
+            else
+                log.warn("news texts", c.id, err)
+            end
+        end
+    end
+    local keep = {}
+    for _, r in ipairs(self.brief.reads or {}) do keep[r.id .. ".json"] = true end
+    for _, r in ipairs(self:unread()) do
+        if not util.file_exists(self:_read_path(r.id)) then
+            local _, err, raw = self:_get_json(base .. "reads/" .. r.id .. ".json", 90)
+            if raw then util.write_file(self:_read_path(r.id), raw) else log.warn("read text", r.id, err) end
+        end
+    end
+    -- forget texts that left the pool, and read-marks for them
+    for _, e in ipairs(util.list_dir(self.dir .. "/reads")) do
+        if not keep[e.name] then os.remove(self.dir .. "/reads/" .. e.name) end
+    end
+    local still = {}
+    for _, r in ipairs(self.brief.reads or {}) do still[r.id] = true end
+    local changed = false
+    for id in pairs(self.read) do if not still[id] then self.read[id] = nil; changed = true end end
+    if changed then util.save_table(self.read_path, self.read) end
+    self:_save_state()
 end
 
 function Data:weather_stale()
@@ -171,6 +286,7 @@ function Data:refresh(force)
         local b, berr = self:refresh_brief(force)
         local w, werr = self:refresh_weather(force)
         local c, cerr = self:refresh_calendar(force)
+        if b then self:fetch_texts() end
         results = { brief = b, brief_err = berr, weather = w, weather_err = werr, calendar = c, calendar_err = cerr }
         if self.app.telegram then
             local n, terr = self.app:poll_telegram_now()

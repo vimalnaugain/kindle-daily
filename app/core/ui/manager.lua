@@ -80,6 +80,9 @@ function UI:close(view)
             table.remove(self.stack, i)
             if view.on_close then view:on_close() end
             self:set_dirty(view.close_refresh or "partial")
+            -- the view underneath is visible again (lists refresh, e.g. read marks)
+            local top = self.stack[#self.stack]
+            if top and top.on_show_again and i == #self.stack + 1 then pcall(top.on_show_again, top) end
             return true
         end
     end

@@ -1,21 +1,16 @@
 # Daily: the Kindle app
 
-A dashboard of cards that opens on a jailbroken Kindle:
+A dashboard of cards in two parts. **Today:** a 12-hour clock with the date
+and day/month/year progress, weather and air quality, the to-do list, and the
+calendar (month and next events). **Reading:** long reads (always at least 5
+unread, new every morning, mark as read), a quote of the day from a classic
+book, and news on the topics you pick (Menu → News topics). Tap anything to
+open it; long-press a long read to mark it read.
 
-- **Clock** (12-hour) and date, with how far through the day, month and year you are
-- **Weather** and air quality for your city (Open-Meteo, no key)
-- **News**: the morning edition, 5 stories each for AI, Content Design,
-  Delhi & India, International and Stocks, with Nifty, Sensex and Nifty Bank.
-  Tap a headline to read it; the last page has a QR code for the original
-- **Article of the day**: Wikipedia's featured article, in full
-- **To-do**: add items on the Kindle (**+ ADD** opens a keyboard) or from your
-  phone through your own Telegram bot; tap to tick off, long-press to delete
-- **Calendar**: this month, with dots on busy days, and today's and tomorrow's
-  events from Google Calendar's private iCal address
-
-It refreshes when it opens, when the Kindle wakes, and every 30 minutes
-(Telegram every 2 minutes) while it's on. Everything is cached, so it works
-offline, and while the Kindle sleeps the screen keeps today's dashboard.
+Installing: see the [main README](../README.md#install-5-minutes). The USB zip
+(`tools/package_kindle.sh`) holds `daily/` (the app, which also keeps its
+settings and cache), `documents/Daily.sh` (the library item, found by the
+search bar too) and a KUAL entry.
 
 ## Updates
 

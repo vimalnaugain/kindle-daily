@@ -1,23 +1,16 @@
 --[[
-The home screen: a grid of cards.
+The home screen, in two parts:
 
-  ┌──────────────────────────┬───────────────────┐
-  │ 2:12 PM                  │ 26°            ☁  │
-  │ TUESDAY                  │ PARTLY CLOUDY     │
-  │ 24 NOVEMBER 2026         │ feels 25° ↑27 ↓12 │
-  │ day ▓▓▓▓░░ month ▓▓▓▓▓░  │ AQI 212 …         │
-  ├──────────────────────────┴───────────────────┤
-  │ NEWS  [AI][Design][India][World][Stocks]     │
-  │ 1 Headline …                                 │
-  │ Nifty 25,350 ▼1.75%  Sensex …              › │
-  ├──────────────────────────┬───────────────────┤
-  │ ARTICLE OF THE DAY       │ TO-DO · 3 LEFT    │
-  ├──────────────────────────┼───────────────────┤
-  │ NOVEMBER 2026 (month)    │ TODAY (agenda)    │
-  └──────────────────────────┴───────────────────┘
-  ☰ Menu        Updated 2:12 PM · 87%      Refresh
+  TODAY ──────────────────────────────────────────
+  ╭ clock, date, progress ╮ ╭ weather ╮
+  ╭ to-do        ╮ ╭ calendar: month + next events ╮
+  READING ────────────────────────────────────────
+  ╭ long reads: unread pieces, newest first        ╮
+  ╭ quote of the day ╮ ╭ news: your topics         ╮
+  ☰ Menu          Updated 2:12 PM · 87%      Refresh
 
-Landscape puts the cards in two columns. Everything scales with the screen.
+Productivity cards use the sans face, reading cards the serif face.
+Landscape puts the two parts side by side. Everything scales with the screen.
 --]]
 local Font = require("core.font")
 local W = require("core.ui.widgets")
@@ -30,7 +23,6 @@ local DOT = " \194\183 "
 local UP, DOWN = "\226\150\178", "\226\150\188" -- ▲ ▼
 local BOX, CHECKED = "\226\152\144", "\226\152\145" -- ☐ ☑
 
-local SHORT = { ai = "AI", content_design = "Design", india = "India", world = "World", markets = "Stocks" }
 
 function Dashboard.new(app)
     return setmetatable({ app = app, fullscreen = true, refresh_mode = "full", targets = {} }, Dashboard)
@@ -39,25 +31,6 @@ end
 ------------------------------------------------------------------------------
 -- Helpers
 ------------------------------------------------------------------------------
-
-function Dashboard:categories()
-    local b = self.app.data.brief
-    return b and b.categories or {}
-end
-
-function Dashboard:current_index()
-    local id = self.app.settings.tab
-    for i, c in ipairs(self:categories()) do if c.id == id then return i end end
-    return 1
-end
-
-function Dashboard:select(i)
-    local cats = self:categories()
-    if #cats == 0 then return end
-    self.app.settings.tab = cats[((i - 1) % #cats) + 1].id
-    self.app:save_settings()
-    self.ui:set_dirty("partial")
-end
 
 local function fmt_num(x, decimals)
     local s = string.format("%." .. (decimals or 2) .. "f", x)
@@ -89,7 +62,7 @@ function Dashboard:metrics(c)
     local function px(n) return math.max(1, math.floor(n * k + 0.5)) end
     return {
         k = k, px = px, portrait = portrait,
-        pad = px(22), gap = px(14), inner = px(20),
+        pad = px(22), gap = px(16), inner = px(22), radius = px(16), track = px(2),
         border = math.max(2, px(2.5)), hair = math.max(1, px(1.5)),
         clock = Font.get("sans", "b", px(128)),
         big = Font.get("sans", "b", px(96)),
@@ -104,20 +77,66 @@ function Dashboard:metrics(c)
         title = Font.get("serif", "b", px(34)),
         serif = Font.get("serif", "r", px(26)),
         italic = Font.get("serif", "i", px(26)),
+        section = Font.get("sans", "b", px(24)),
+        rtitle = Font.get("serif", "b", px(28)),
+        quote = Font.get("serif", "i", px(28)),
     }
 end
 
---- Card frame with a small upper-case label. Returns the content rect.
+--- A rounded rectangle outline.
+local function rrect(c, r, rad, t)
+    local x, y, w, h = r.x, r.y, r.w, r.h
+    c:fill_rect(x + rad, y, w - 2 * rad, t, 0)
+    c:fill_rect(x + rad, y + h - t, w - 2 * rad, t, 0)
+    c:fill_rect(x, y + rad, t, h - 2 * rad, 0)
+    c:fill_rect(x + w - t, y + rad, t, h - 2 * rad, 0)
+    local steps = math.max(8, rad * 2)
+    for i = 0, steps do
+        local a = (math.pi / 2) * i / steps
+        local dx, dy = math.floor((1 - math.cos(a)) * rad), math.floor((1 - math.sin(a)) * rad)
+        c:fill_rect(x + dx, y + dy, t, t, 0)                     -- top left
+        c:fill_rect(x + w - t - dx, y + dy, t, t, 0)             -- top right
+        c:fill_rect(x + dx, y + h - t - dy, t, t, 0)             -- bottom left
+        c:fill_rect(x + w - t - dx, y + h - t - dy, t, t, 0)     -- bottom right
+    end
+end
+Dashboard.rrect = rrect
+
+--- Upper-case label with a little letter spacing. Returns the x after it.
+local function spaced(c, font, s, x, y, color, sp)
+    for ch in s:gmatch("[%z\1-\127\194-\244][\128-\191]*") do
+        x = c:text(font, ch, x, y, color) + sp
+    end
+    return x
+end
+local function spaced_width(font, s, sp)
+    local w = 0
+    for ch in s:gmatch("[%z\1-\127\194-\244][\128-\191]*") do w = w + font:width(ch) + sp end
+    return w
+end
+
+--- Card frame with a small label. Returns the content rect.
 function Dashboard:card(c, m, r, label, label_right)
-    c:rect(r.x, r.y, r.w, r.h, 0, m.border)
+    rrect(c, r, m.radius, m.border)
     local x, y, w = r.x + m.inner, r.y + m.inner, r.w - 2 * m.inner
     if label then
         local base = y + m.label.ascent
-        c:text(m.label, label:upper(), x, base, 60)
-        if label_right then right(c, m.label, label_right, x + w, base, 60) end
-        y = y + m.label.line_height + m.px(10)
+        spaced(c, m.label, label:upper(), x, base, 70, m.track)
+        if label_right and label_right ~= "" then
+            local lw = spaced_width(m.label, label_right, m.track)
+            spaced(c, m.label, label_right, x + w - lw, base, 70, m.track)
+        end
+        y = y + m.label.line_height + m.px(12)
     end
     return { x = x, y = y, w = w, h = r.y + r.h - m.inner - y }
+end
+
+--- "TODAY ─────" section heading. Returns the y below it.
+function Dashboard:section(c, m, x, y, w, title)
+    local base = y + m.section.ascent
+    local x2 = spaced(c, m.section, title, x + m.px(4), base, 0, m.px(3))
+    c:fill_rect(x2 + m.px(12), base - math.floor(m.section.ascent * 0.35), x + w - x2 - m.px(12), m.hair, 0)
+    return y + m.section.line_height + m.px(10)
 end
 
 ------------------------------------------------------------------------------
@@ -130,7 +149,7 @@ function Dashboard:_clock(c, m, r)
     local p = clock:parts()
     local bottom = b.y + b.h
     -- the time: as big as the card allows (96 or 128 px at Paperwhite size)
-    local big = (b.h >= m.px(300)) and m.clock or m.big
+    local big = (b.h >= m.px(330)) and m.clock or m.big
     local base = b.y + big.ascent - m.px(8)
     if self.sleep_mode then
         c:text(big, tostring(p.day), b.x, base)
@@ -214,136 +233,105 @@ function Dashboard:_hour(h)
     return (h12 == 0 and 12 or h12) .. (h < 12 and "am" or "pm")
 end
 
-function Dashboard:_markets_line(c, m, x, y, w)
-    local mk = self.app.data.brief and self.app.data.brief.markets
-    if not (mk and mk.indices and #mk.indices > 0) then return 0 end
-    local h = m.body.line_height + m.px(10)
-    local base = y + m.body.ascent + m.px(4)
-    local gap = m.px(26)
-    local cx = x
-    for _, ix in ipairs(mk.indices) do
-        local name = ix.name:gsub("^Nifty 50$", "Nifty"):gsub("^Nifty Bank$", "Bank")
-        local pct = ix.change_pct or 0
-        local parts = { { m.small, name .. " " }, { m.bodyb, fmt_num(ix.price, 0) .. " " },
-            { m.body, string.format("%s%.2f%%", pct >= 0 and UP or DOWN, math.abs(pct)) } }
-        local need = 0
-        for _, p in ipairs(parts) do need = need + p[1]:width(p[2]) end
-        if cx + need > x + w - m.px(30) then break end
-        for _, p in ipairs(parts) do cx = c:text(p[1], p[2], cx, base) end
-        cx = cx + gap
+function Dashboard:_reads(c, m, r)
+    local data = self.app.data
+    local unread = data:unread()
+    self.read_rows = {}
+    local b = self:card(c, m, r, "Long reads", #unread > 0 and (#unread .. " UNREAD") or nil)
+    add_target(self, { x = r.x, y = r.y, w = r.w, h = b.y - r.y }, function() self.app:show_reads() end)
+    if #unread == 0 then
+        local msg = (data.brief and data.brief.reads and #data.brief.reads > 0)
+            and "You've read them all. New pieces arrive every morning."
+            or "Great long reads arrive with the morning edition."
+        for i, l in ipairs(wrap_n(m.serif, msg, b.w, 2)) do c:text(m.serif, l, b.x, b.y + i * m.serif.line_height, 80) end
+        return
     end
-    right(c, m.h2, "\226\128\186", x + w, base)
-    add_target(self, { x = x - m.inner, y = y - m.px(6), w = w + 2 * m.inner, h = h + m.px(12) },
-        function() self.app:show_markets() end)
-    return h
+    local rh = m.rtitle.line_height + m.small.line_height + m.px(10)
+    local n = math.max(1, math.floor((b.h + m.px(10)) / rh))
+    local more = #unread - n
+    for i = 1, math.min(n, #unread) do
+        local it = unread[i]
+        local top = b.y + (i - 1) * rh
+        local base = top + m.rtitle.ascent
+        local tail = (i == n and more > 0) and string.format("  +%d more \u{203A}", more) or ""
+        c:text(m.rtitle, W.fit(m.rtitle, it.title, b.w), b.x, base)
+        local meta = it.source .. DOT .. it.minutes .. " min" .. (it.label and (DOT .. it.label) or "")
+        local my = base + m.rtitle.descent + m.small.ascent + m.px(2)
+        c:text(m.small, W.fit(m.small, meta, b.w - m.small:width(tail)), b.x, my, 90)
+        if tail ~= "" then right(c, m.small, tail, b.x + b.w, my, 60) end
+        if i < math.min(n, #unread) then c:fill_rect(b.x, top + rh - m.px(5), b.w, m.hair, 200) end
+        local idx = i
+        local row = { x = r.x, y = top - m.px(4), w = r.w, h = rh }
+        add_target(self, row, function() self.app:open_read(idx) end)
+        self.read_rows[#self.read_rows + 1] = { r = row, item = it }
+    end
+end
+
+function Dashboard:_quote(c, m, r)
+    local q = self.app.data.brief and self.app.data.brief.quote
+    local b = self:card(c, m, r, "Quote of the day")
+    if not q then
+        for i, l in ipairs(wrap_n(m.serif, "A passage from a classic book arrives each morning.", b.w, 3)) do
+            c:text(m.serif, l, b.x, b.y + i * m.serif.line_height, 80)
+        end
+        return
+    end
+    add_target(self, r, function() self.app:show_quote() end)
+    local attr_h = m.small.line_height * 2 + m.px(6)
+    local n = math.max(1, math.floor((b.h - attr_h) / m.quote.line_height))
+    local lines = wrap_n(m.quote, "\u{201C}" .. q.text .. "\u{201D}", b.w, n)
+    local y = b.y
+    for _, l in ipairs(lines) do
+        y = y + m.quote.line_height
+        c:text(m.quote, l, b.x, y - m.quote.descent)
+    end
+    local ay = b.y + b.h - m.small.line_height - m.px(2)
+    c:text(m.bodyb, W.fit(m.bodyb, "\u{2014} " .. q.book, b.w), b.x, ay)
+    c:text(m.small, W.fit(m.small, q.author, b.w), b.x + m.bodyb:width("\u{2014} "), ay + m.small.line_height + m.px(2), 80)
 end
 
 function Dashboard:_news(c, m, r)
-    local cats = self:categories()
-    c:rect(r.x, r.y, r.w, r.h, 0, m.border)
-    local x, w = r.x + m.inner, r.w - 2 * m.inner
-    local y = r.y + m.inner
-    -- label and tabs
-    local lab = "NEWS"
-    c:text(m.label, lab, x, y + (m.px(44) + m.label.ascent - m.label.descent) / 2, 60)
-    local tx = x + m.label:width(lab) + m.px(20)
-    local th = m.px(44)
-    if #cats > 0 then
-        local cur = self:current_index()
-        local tw = (x + w - tx) / #cats
-        for i, cat in ipairs(cats) do
-            local x1, x2 = math.floor(tx + (i - 1) * tw), math.floor(tx + i * tw)
-            local label = W.fit(m.bodyb, cat.short or SHORT[cat.id] or cat.title, x2 - x1 - m.px(8))
-            local base = y + (th + m.bodyb.ascent - m.bodyb.descent) / 2
-            if i == cur then
-                c:fill_rect(x1, y, x2 - x1, th, 0)
-                c:text(m.bodyb, label, x1 + (x2 - x1 - m.bodyb:width(label)) / 2, base, 255)
-            else
-                c:rect(x1, y, x2 - x1, th, 0, m.hair)
-                c:text(m.bodyb, label, x1 + (x2 - x1 - m.bodyb:width(label)) / 2, base, 0)
-            end
-            add_target(self, { x = x1, y = y - m.px(8), w = x2 - x1, h = th + m.px(16) }, function()
-                if i ~= self:current_index() then self:select(i) end
-            end)
-        end
-    end
-    y = y + th + m.px(14)
-    -- markets along the bottom
-    local bottom = r.y + r.h - m.inner
-    local mh = m.body.line_height + m.px(10)
-    local has_markets = self.app.data.brief and self.app.data.brief.markets
-        and self.app.data.brief.markets.indices and #self.app.data.brief.markets.indices > 0
-    if has_markets then
-        bottom = bottom - mh - m.px(8)
-        c:fill_rect(x, bottom + m.px(4), w, m.hair, 0)
-        self:_markets_line(c, m, x, bottom + m.px(10), w)
-    end
-    if #cats == 0 then
-        local lines = wrap_n(m.body, "No news yet. The morning edition downloads when the Kindle is on Wi-Fi.", w, 3)
-        for i, l in ipairs(lines) do c:text(m.body, l, x, y + i * m.body.line_height, 80) end
+    local data = self.app.data
+    local topics = data:topics()
+    local names = {}
+    for _, t in ipairs(topics) do names[#names + 1] = (t.short or t.title):upper() end
+    local b = self:card(c, m, r, "News", #topics > 0 and "TOPICS \u{203A}" or nil)
+    add_target(self, { x = r.x, y = r.y, w = r.w, h = b.y - r.y }, function() self.app:choose_topics() end)
+    if #topics == 0 then
+        local lines = wrap_n(m.serif, "Pick the news topics you want to see.", b.w, 3)
+        local y = b.y
+        for _, l in ipairs(lines) do y = y + m.serif.line_height; c:text(m.serif, l, b.x, y - m.serif.descent, 60) end
+        local f = m.bodyb
+        local label = "Choose topics \u{203A}"
+        local br = { x = b.x, y = y + m.px(16), w = f:width(label) + m.px(40), h = f.line_height + m.px(20) }
+        W.draw_button(c, br, label, f, true, m.border)
+        add_target(self, r, function() self.app:choose_topics() end)
         return
     end
-    local stories = cats[self:current_index()].stories or {}
-    local num_w = m.h2:width("5") + m.px(18)
-    local text_w = w - num_w
-    for i, s in ipairs(stories) do
-        local lines = wrap_n(m.headline, s.title, text_w, 2)
-        local need = #lines * m.headline.line_height + m.small.line_height + m.px(8)
+    local news = data:news()
+    c:text(m.small, W.fit(m.small, table.concat(names, " \u{00B7} "), b.w), b.x, b.y + m.small.ascent - m.px(4), 90)
+    local y = b.y + m.small.line_height + m.px(4)
+    local foot = string.format("All %d stories \u{203A}", #news)
+    local bottom = b.y + b.h - m.small.line_height - m.px(4)
+    for i, s in ipairs(news) do
+        local lines = wrap_n(m.rtitle, s.title, b.w, 2)
+        local need = #lines * m.rtitle.line_height + m.px(10)
         if y + need > bottom then
-            -- one line left? squeeze the headline into it
-            lines = { W.fit(m.headline, s.title, text_w) }
-            need = m.headline.line_height + m.small.line_height + m.px(8)
+            lines = { W.fit(m.rtitle, s.title, b.w) }
+            need = m.rtitle.line_height + m.px(10)
             if y + need > bottom then break end
         end
         local top = y
-        local base = y + m.headline.ascent
-        c:text(m.h2, tostring(i), x, base)
         for _, l in ipairs(lines) do
-            c:text(m.headline, l, x + num_w, base)
-            base = base + m.headline.line_height
+            y = y + m.rtitle.line_height
+            c:text(m.rtitle, l, b.x, y - m.rtitle.descent)
         end
-        local meta = { s.source }
-        meta[#meta + 1] = (s.text and (s.minutes or 0) > 0) and (s.minutes .. " min read") or "summary only"
-        if s.also_in and #s.also_in > 0 then meta[#meta + 1] = string.format("+%d", #s.also_in) end
-        c:text(m.small, W.fit(m.small, table.concat(meta, DOT), text_w), x + num_w,
-            base - m.headline.ascent + m.small.ascent - m.px(2), 90)
-        y = top + need
+        y = y + m.px(10)
         local idx = i
-        add_target(self, { x = r.x, y = top - m.px(4), w = r.w, h = need },
-            function() self.app:open_story(self:current_index(), idx) end)
+        add_target(self, { x = r.x, y = top - m.px(4), w = r.w, h = need }, function() self.app:open_news(idx) end)
     end
-end
-
-function Dashboard:_article(c, m, r)
-    local a = self.app.data.brief and self.app.data.brief.article
-    local b = self:card(c, m, r, "Article of the day", a and a.source and a.source:upper() or nil)
-    if not a then
-        local lines = wrap_n(m.body, "A free long read arrives with each morning's edition.", b.w, 3)
-        for i, l in ipairs(lines) do c:text(m.body, l, b.x, b.y + i * m.body.line_height, 80) end
-        return
-    end
-    add_target(self, r, function() self.app:open_article_of_the_day() end)
-    local bottom = b.y + b.h
-    local foot = (a.text and a.minutes and a.minutes > 0) and (a.minutes .. " min read \226\128\186") or "Read \226\128\186"
-    bottom = bottom - m.small.line_height
     right(c, m.bodyb, foot, b.x + b.w, b.y + b.h - m.px(2))
-    local y = b.y
-    for _, l in ipairs(wrap_n(m.title, a.title, b.w, 2)) do
-        y = y + m.title.line_height
-        c:text(m.title, l, b.x, y - m.title.descent)
-    end
-    if a.description and a.description ~= "" then
-        y = y + m.italic.line_height
-        c:text(m.italic, W.fit(m.italic, a.description, b.w), b.x, y - m.italic.descent, 50)
-    end
-    y = y + m.px(8)
-    local n = math.floor((bottom - y) / m.serif.line_height)
-    if n > 0 then
-        for _, l in ipairs(wrap_n(m.serif, a.summary or "", b.w, n)) do
-            y = y + m.serif.line_height
-            c:text(m.serif, l, b.x, y - m.serif.descent)
-        end
-    end
+    add_target(self, { x = r.x, y = bottom, w = r.w, h = r.y + r.h - bottom }, function() self.app:show_news() end)
 end
 
 function Dashboard:_todo(c, m, r)
@@ -397,11 +385,16 @@ function Dashboard:_todo(c, m, r)
     end
 end
 
-function Dashboard:_month(c, m, r)
+function Dashboard:_calendar(c, m, r)
     local clock = self.app.clock
     local p = clock:parts()
     local b = self:card(c, m, r, clock.MONTHS[p.month] .. " " .. p.year)
     add_target(self, r, function() self.app:show_agenda() end)
+    -- next events along the bottom, the month above them
+    local ev_h = (m.body.line_height + m.px(4)) * 2 + m.px(12)
+    self:_agenda_list(c, m, { x = b.x, y = b.y + b.h - ev_h + m.px(12), w = b.w, h = ev_h - m.px(12) })
+    c:fill_rect(b.x, b.y + b.h - ev_h + m.px(2), b.w, m.hair, 200)
+    b = { x = b.x, y = b.y, w = b.w, h = b.h - ev_h }
     local busy = {}
     for _, o in ipairs(self.app.data.calendar or {}) do busy[clock:day(o.start)] = true end
     local first = clock.days_from_civil(p.year, p.month, 1)
@@ -451,52 +444,42 @@ function Dashboard:_month(c, m, r)
     end
 end
 
-function Dashboard:_agenda(c, m, r)
+--- Today's remaining events, then tomorrow's, in rect r (no card).
+function Dashboard:_agenda_list(c, m, r)
     local clock, data = self.app.clock, self.app.data
-    local b = self:card(c, m, r, "Today", data.calendar_configured and clock:short_date():upper() or nil)
-    add_target(self, r, function() self.app:show_agenda() end)
     if not data.calendar_configured then
-        local lines = wrap_n(m.body, "Add your Google Calendar's secret iCal address to config.lua (calendar_url).",
-            b.w, math.max(1, math.floor(b.h / m.body.line_height)))
-        for i, l in ipairs(lines) do c:text(m.body, l, b.x, b.y + i * m.body.line_height - m.body.descent, 80) end
+        c:text(m.small, W.fit(m.small, "Add Google Calendar in config.lua", r.w), r.x, r.y + m.small.ascent, 100)
         return
     end
     local now, today = clock:now(), clock:day()
     local items = {}
-    local tomorrow_header = false
     for _, o in ipairs(data.calendar or {}) do
         local d = clock:day(o.start)
-        local ongoing = o.start < now and o.finish > now
-        if (d == today and (o.finish > now or o.all_day)) or ongoing then
-            items[#items + 1] = o
+        if (d == today and (o.finish > now or o.all_day)) or (o.start < now and o.finish > now) then
+            items[#items + 1] = { o = o, when = nil }
         elseif d == today + 1 then
-            if not tomorrow_header then items[#items + 1] = { header = "TOMORROW" }; tomorrow_header = true end
-            items[#items + 1] = o
+            items[#items + 1] = { o = o, tomorrow = true }
         end
     end
-    if #items == 0 or items[1].header then
-        table.insert(items, 1, { note = "Nothing else today" })
+    if #items == 0 then
+        c:text(m.body, "Nothing else today or tomorrow", r.x, r.y + m.body.ascent, 100)
+        return
     end
-    local rh = m.body.line_height + m.px(6)
-    local y = b.y
-    local tw = m.bodyb:width("10:30 PM") + m.px(14)
-    for _, it in ipairs(items) do
-        if y + rh > b.y + b.h + m.px(4) then break end
-        local base = y + m.body.ascent
-        if it.header then
-            c:text(m.label, it.header, b.x, base, 60)
-        elseif it.note then
-            c:text(m.body, it.note, b.x, base, 100)
-        else
-            local t
-            if it.all_day then t = "All day" else
-                local hm, ampm = clock:hm12(it.start)
-                t = hm .. " " .. ampm
-            end
-            c:text(m.bodyb, t, b.x, base)
-            c:text(m.body, W.fit(m.body, it.title, b.w - tw), b.x + tw, base)
-        end
-        y = y + rh
+    local rh = m.body.line_height + m.px(4)
+    local function label(it)
+        local o = it.o
+        local t = o.all_day and "All day" or (function() local hm, ap = clock:hm12(o.start); return hm .. " " .. ap end)()
+        return it.tomorrow and ("Tmrw " .. t) or t
+    end
+    local tw = 0
+    for _, it in ipairs(items) do tw = math.max(tw, m.bodyb:width(label(it))) end
+    tw = tw + m.px(16)
+    for i, it in ipairs(items) do
+        local base = r.y + (i - 1) * rh + m.body.ascent
+        if base + m.body.descent > r.y + r.h + m.px(4) then break end
+        local o = it.o
+        c:text(m.bodyb, label(it), r.x, base)
+        c:text(m.body, W.fit(m.body, o.title, r.w - tw), r.x + tw, base)
     end
 end
 
@@ -542,41 +525,46 @@ end
 -- Layout
 ------------------------------------------------------------------------------
 
---- Card rectangles for the canvas size.
+--- Card rectangles for the canvas size: { name = rect }, sections, footer.
 function Dashboard:layout(c, m)
     local P, G = m.pad, m.gap
     local footer_h = m.body.line_height + m.px(22)
-    local W_, H = c.w - 2 * P, c.h - 2 * P - footer_h
-    local L = { footer = c.h - P - footer_h + m.px(8) }
+    local SL = m.section.line_height + m.px(10)
+    local L = { footer = c.h - P - footer_h + m.px(8), sections = {} }
     local function rect(x, y, w, h) return { x = math.floor(x), y = math.floor(y), w = math.floor(w), h = math.floor(h) } end
+    local function split(r, frac)
+        local w1 = (r.w - G) * frac
+        return rect(r.x, r.y, w1, r.h), rect(r.x + w1 + G, r.y, r.w - w1 - G, r.h)
+    end
+    local W_ = c.w - 2 * P
+    local H = L.footer - m.px(8) - P
     if m.portrait then
-        local avail = H - 4 * G
-        local h1, h2, h3 = avail * 0.245, avail * 0.30, avail * 0.215
+        local avail = H - 2 * SL - 3 * G
+        local h1, h2, h3 = avail * 0.215, avail * 0.29, avail * 0.20
         local h4 = avail - h1 - h2 - h3
         local y = P
-        local split = W_ * 0.56
-        L.clock = rect(P, y, split - G / 2, h1)
-        L.weather = rect(P + split + G / 2, y, W_ - split - G / 2, h1)
+        L.sections[#L.sections + 1] = { x = P, y = y, w = W_, title = "TODAY" }
+        y = y + SL
+        L.clock, L.weather = split(rect(P, y, W_, h1), 0.56)
         y = y + h1 + G
-        L.news = rect(P, y, W_, h2)
+        L.todo, L.calendar = split(rect(P, y, W_, h2), 0.46)
         y = y + h2 + G
-        L.article = rect(P, y, split - G / 2, h3)
-        L.todo = rect(P + split + G / 2, y, W_ - split - G / 2, h3)
+        L.sections[#L.sections + 1] = { x = P, y = y, w = W_, title = "READING" }
+        y = y + SL
+        L.reads = rect(P, y, W_, h3)
         y = y + h3 + G
-        L.month = rect(P, y, split - G / 2, h4)
-        L.agenda = rect(P + split + G / 2, y, W_ - split - G / 2, h4)
+        L.quote, L.news = split(rect(P, y, W_, h4), 0.46)
     else
-        local lw = W_ * 0.40
-        local rx, rw = P + lw + G, W_ - lw - G
-        local avail = H - 2 * G
-        L.clock = rect(P, P, lw, avail * 0.33)
-        L.weather = rect(P, P + avail * 0.33 + G, lw, avail * 0.27)
-        L.month = rect(P, P + avail * 0.60 + 2 * G, lw, avail * 0.40)
-        L.news = rect(rx, P, rw, avail * 0.46)
-        local y = P + avail * 0.46 + G
-        L.article = rect(rx, y, rw * 0.55 - G / 2, avail * 0.30)
-        L.todo = rect(rx + rw * 0.55 + G / 2, y, rw * 0.45 - G / 2, avail * 0.30)
-        L.agenda = rect(rx, y + avail * 0.30 + G, rw, avail * 0.24)
+        local lw = (W_ - 2 * G) * 0.5
+        local rx, rw = P + lw + 2 * G, W_ - lw - 2 * G
+        local avail = H - SL - G
+        L.sections[#L.sections + 1] = { x = P, y = P, w = lw, title = "TODAY" }
+        L.sections[#L.sections + 1] = { x = rx, y = P, w = rw, title = "READING" }
+        local y = P + SL
+        L.clock, L.weather = split(rect(P, y, lw, avail * 0.40), 0.56)
+        L.todo, L.calendar = split(rect(P, y + avail * 0.40 + G, lw, avail * 0.60), 0.46)
+        L.reads = rect(rx, y, rw, avail * 0.36)
+        L.quote, L.news = split(rect(rx, y + avail * 0.36 + G, rw, avail * 0.64), 0.46)
     end
     return L
 end
@@ -586,7 +574,11 @@ function Dashboard:draw(c)
     self.targets = {}
     c:fill_rect(0, 0, c.w, c.h, 255)
     local L = self:layout(c, m)
-    self.cards = L
+    self.cards = {}
+    for _, name in ipairs({ "clock", "weather", "todo", "calendar", "reads", "quote", "news" }) do
+        self.cards[name] = L[name]
+    end
+    for _, sct in ipairs(L.sections) do self:section(c, m, sct.x, sct.y, sct.w, sct.title) end
     local function safe(fn, r)
         local ok, err = pcall(fn, self, c, m, r)
         if not ok then
@@ -596,11 +588,11 @@ function Dashboard:draw(c)
     end
     safe(self._clock, L.clock)
     safe(self._weather, L.weather)
-    safe(self._news, L.news)
-    safe(self._article, L.article)
     safe(self._todo, L.todo)
-    safe(self._month, L.month)
-    safe(self._agenda, L.agenda)
+    safe(self._calendar, L.calendar)
+    safe(self._reads, L.reads)
+    safe(self._quote, L.quote)
+    safe(self._news, L.news)
     self:_footer(c, m, L.footer)
 end
 
@@ -611,13 +603,18 @@ function Dashboard:handle(ev)
             local t = self.targets[i]
             if W.inside(ev, t.r) then t.fn(); return true end
         end
-    elseif ev.type == "swipe" then
-        if ev.dir == "left" then self:select(self:current_index() + 1)
-        elseif ev.dir == "right" then self:select(self:current_index() - 1) end
-    elseif ev.type == "key" then
-        if ev.key == "next" then self:select(self:current_index() + 1)
-        elseif ev.key == "prev" then self:select(self:current_index() - 1)
-        elseif ev.key == "menu" then self.app:show_menu() end
+    elseif ev.type == "hold" then
+        -- long-press a long read: mark it read
+        for _, row in ipairs(self.read_rows or {}) do
+            if W.inside(ev, row.r) then
+                self.app.data:set_read(row.item, true)
+                self.app:notify("Marked as read: " .. row.item.title, 1500)
+                self.ui:set_dirty("partial")
+                break
+            end
+        end
+    elseif ev.type == "key" and ev.key == "menu" then
+        self.app:show_menu()
     end
     return true
 end

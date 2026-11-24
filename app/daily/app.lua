@@ -111,6 +111,108 @@ end
 
 function App:show_markets() self:show_text("Markets", self:markets_text()) end
 
+------------------------------------------------------------------------------
+-- Reading: long reads, news, quote
+------------------------------------------------------------------------------
+
+function App:open_read(index)
+    local list = self.data:unread()
+    if not list[index] then return end
+    self.ui:show(require("daily.article").new(self, { title = "Long reads", stories = list }, index, { reads = true }))
+end
+
+--- Every long read in the pool: unread first. Tap to read, hold to mark read / unread.
+function App:show_reads()
+    local view
+    local function build()
+        local list, rows = {}, {}
+        for _, r in ipairs(self.data:unread()) do list[#list + 1] = r end
+        for _, r in ipairs(self.data.brief and self.data.brief.reads or {}) do
+            if self.data:is_read(r) then list[#list + 1] = r end
+        end
+        for i, r in ipairs(list) do
+            local read = self.data:is_read(r)
+            rows[#rows + 1] = {
+                text = (read and "\u{2713} " or "") .. r.title,
+                subtext = string.format("%s \u{00B7} %d min%s", r.source, r.minutes or 0, read and " \u{00B7} read" or ""),
+                callback = function()
+                    self.ui:show(require("daily.article").new(self, { title = "Long reads", stories = list }, i, { reads = true }))
+                end,
+                hold_callback = function() self.data:set_read(r, not read); view:set_items(build()) end,
+            }
+        end
+        if #rows == 0 then rows[1] = { text = "No long reads yet. They arrive with the morning edition.", callback = function() end } end
+        return rows
+    end
+    view = self.ui:show(W.ListView.new({ title = "Long reads  (hold: mark read)", items = build() }))
+    view.on_show_again = function() view:set_items(build()) end
+    view.on_close = function() self.ui:set_dirty("full") end
+end
+
+function App:open_news(index)
+    local list = self.data:news()
+    if not list[index] then return end
+    self.ui:show(require("daily.article").new(self, { title = "News", stories = list }, index))
+end
+
+function App:show_news()
+    local list = self.data:news()
+    local rows = {}
+    for i, s in ipairs(list) do
+        rows[#rows + 1] = { text = s.title,
+            subtext = string.format("%s \u{00B7} %s%s", s.topic or "", s.source or "",
+                (s.has_text and (s.minutes or 0) > 0) and (" \u{00B7} " .. s.minutes .. " min") or ""),
+            callback = function() self:open_news(i) end }
+    end
+    if #rows == 0 then rows[1] = { text = "Pick news topics first: Menu > News topics.", callback = function() self:choose_topics() end } end
+    self.ui:show(W.ListView.new({ title = string.format("News (%d)", #list), items = rows }))
+end
+
+--- Pick news topics: tap to switch each on or off.
+function App:choose_topics()
+    local cats = self.data.brief and self.data.brief.categories or {}
+    if #cats == 0 then
+        self:notify("Topics appear once the first edition has downloaded.", 3000)
+        return
+    end
+    local view
+    local function picked()
+        local set = {}
+        for _, id in ipairs(self.settings.topics or {}) do set[id] = true end
+        return set
+    end
+    local function build()
+        local set, rows = picked(), {}
+        for _, c in ipairs(cats) do
+            rows[#rows + 1] = { text = (set[c.id] and "\u{2611}  " or "\u{2610}  ") .. c.title,
+                subtext = string.format("%d stories today", #(c.stories or {})),
+                callback = function()
+                    local s2 = picked()
+                    s2[c.id] = not s2[c.id] or nil
+                    local list = {}
+                    for _, cc in ipairs(cats) do if s2[cc.id] then list[#list + 1] = cc.id end end
+                    self.settings.topics = list
+                    self:save_settings()
+                    view:set_items(build())
+                end }
+        end
+        return rows
+    end
+    view = self.ui:show(W.ListView.new({ title = "News topics  (tap to pick)", items = build() }))
+    view.on_close = function()
+        self.ui:set_dirty("full")
+        -- download the texts of newly picked topics
+        self.ui:spawn(function() self.data:fetch_texts(); self.ui:set_dirty("partial") end)
+    end
+end
+
+function App:show_quote()
+    local q = self.data.brief and self.data.brief.quote
+    if not q then return end
+    self:show_text("Quote of the day", string.format("%s\n\n**\u{2014} %s**, %s\n\n*From Project Gutenberg's free library: %s*",
+        q.text, q.book, q.author, q.url or ""))
+end
+
 function App:open_article_of_the_day()
     local a = self.data.brief and self.data.brief.article
     if not a then return end
@@ -234,6 +336,11 @@ function App:show_menu()
     local items = {
         { text = "Refresh now", callback = function() self:refresh(true) end },
         { text = "Add a to-do", callback = function() self:add_todo() end },
+        { text = function()
+            local n = #(self.settings.topics or {})
+            return "News topics" .. (n > 0 and (" (" .. n .. " picked)") or " (none)")
+        end, callback = function() self:choose_topics() end },
+        { text = "All long reads", callback = function() self:show_reads() end },
         { text = function() return "City: " .. self:city().name end, callback = function() self:choose_city() end },
         { text = function()
             return "Article text: " .. ({ s = "Small", m = "Medium", l = "Large" })[self.settings.article_size or "m"]

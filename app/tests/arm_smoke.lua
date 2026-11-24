@@ -25,10 +25,13 @@ local app = {
     clock = clock, config = {},
     settings = {}, save_settings = function() end,
     device = { battery = function() return 80 end },
-    data = { brief = brief, base_url = function() return "" end, calendar = {} },
+    data = setmetatable({ brief = brief, calendar = {}, read = {}, dir = "/tmp" }, { __index = Data }),
     todo = require("daily.todo").new("/tmp/daily_arm_todo.lua", clock),
 }
 app.todo:command("buy milk tomorrow")
+app.data.app = app
+app.settings.topics = { brief.categories[1].id }
+app.data.read_path = "/tmp/daily_arm_read.lua"
 local Cal = require("daily.calendar")
 app.data.calendar = Cal.occurrences(Cal.parse(util.read_file("tests/fixtures/calendar.ics"), clock.offset),
     clock, clock:day(), clock:day() + 30)
@@ -38,7 +41,8 @@ dash.ui = { set_dirty = function() end }
 local c = Canvas.new(1072, 1448)
 dash:draw(c)
 assert(#dash.targets > 10, "dashboard tap targets")
-assert(dash.cards and dash.cards.todo and dash.cards.month, "cards")
+assert(dash.cards and dash.cards.todo and dash.cards.calendar and dash.cards.reads, "cards")
+assert(#dash.read_rows >= 1, "long reads drawn")
 local png = c:to_png()
 assert(#png > 1000 and png:sub(2, 4) == "PNG", "png")
 assert(require("core.qr").encode("https://example.com/" .. string.rep("a", 150)).size == 53, "qr v9")

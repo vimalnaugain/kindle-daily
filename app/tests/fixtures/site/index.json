@@ -1,9 +1,1 @@
-{
- "schema": 1,
- "latest": "2026-11-24",
- "version": "6f81e6ef7afb",
- "generated_at": "2026-11-24T11:06:50Z",
- "dates": [
-  "2026-11-24"
- ]
-}
+{"schema": 1, "latest": "2026-11-24", "version": "fixture2", "generated_at": "2026-11-24T11:06:50Z", "dates": ["2026-11-24"]}

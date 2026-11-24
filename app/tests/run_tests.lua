@@ -143,6 +143,7 @@ test("dashboard cards fit every Kindle size and orientation", function()
         os.execute(string.format("cp %s/e2e/data/brief.json %s/e2e/data/weather.lua %s/data/ 2>/dev/null", OUT, OUT, home))
         local cfg = util.load_table(home .. "/config.lua")
         cfg.data_dir = home .. "/data"
+        util.save_table(home .. "/data/settings.lua", { topics = { "ai", "india" } })
         local app = App.new({ root = root, home = home, device = "emulator", config = cfg })
         app.data:refresh_calendar(true)
         for i = 1, 9 do app.todo:add("Item number " .. i .. " with a fairly long description") end
@@ -159,6 +160,9 @@ test("dashboard cards fit every Kindle size and orientation", function()
             end
         end
         assert(#names == 7, "seven cards")
+        for _, want in ipairs({ "clock", "weather", "todo", "calendar", "reads", "quote", "news" }) do
+            assert(dash.cards[want], want .. " card")
+        end
         for i = 1, #names do
             for j = i + 1, #names do
                 local a, b = dash.cards[names[i]], dash.cards[names[j]]
@@ -353,6 +357,53 @@ test("updates: checks once a day, downloads, verifies, asks to restart", functio
     -- and it only checks once a day
     util.write_file(site .. "/latest.json", "not json")
     app:auto_update()
+end)
+
+test("reading: topics, news texts, long reads and read marks", function()
+    local app, home = new_app("reading")
+    eq(#app.data:topics(), 0, "no topics until you pick some")
+    eq(#app.data:news(), 0)
+    -- pick two topics in the picker
+    app:choose_topics()
+    local picker = app.ui:top()
+    picker.items[1].callback(picker.items[1])   -- AI
+    picker.items[3].callback(picker.items[3])   -- Delhi & India
+    eq(table.concat(app.settings.topics, ","), "ai,india")
+    app.ui:close(picker)
+    -- fetch_texts ran in a task: run it here (no event loop in the tests)
+    app.data:fetch_texts()
+    assert(util.file_exists(home .. "/data/news/ai.json") and not util.file_exists(home .. "/data/news/world.json"))
+    local news = app.data:news()
+    assert(#news == 10, "all stories of both topics (5 each in the fixture)")
+    local seen = {}
+    for _, s in ipairs(news) do assert(not seen[s.id], "no repeats"); seen[s.id] = true end
+    local with_text = 0
+    for _, s in ipairs(news) do if app.data:text_of(s) then with_text = with_text + 1 end end
+    assert(with_text > 5, "texts from the per-topic files")
+    -- long reads: unread, open, mark read from the last page
+    local unread = app.data:unread()
+    eq(#unread, 7)
+    assert(app.data:text_of(unread[2]), "read text downloaded")
+    app:open_read(2)
+    local art = app.ui:top()
+    local c = draw_top(app)
+    art.page = #art.pages
+    art:draw(c)
+    util.write_file(OUT .. "/read-last-page.png", c:to_png())
+    art:handle({ type = "tap", x = art.read_rect.x + 5, y = art.read_rect.y + 5 })
+    assert(app.data:is_read(unread[2]), "marked as read")
+    eq(#app.data:unread(), 6)
+    -- read marks survive a restart; long-press on the dashboard marks read too
+    local cfg = util.load_table(home .. "/config.lua")
+    cfg.data_dir = home .. "/data"
+    local app2 = require("daily.app").new({ root = root, home = home, device = "emulator", config = cfg })
+    app2.dashboard = app2.ui:show(require("daily.dashboard").new(app2))
+    eq(#app2.data:unread(), 6)
+    local dash = app2.dashboard
+    draw_top(app2)
+    local row = dash.read_rows[1]
+    dash:handle({ type = "hold", x = row.r.x + 10, y = row.r.y + 10 })
+    eq(#app2.data:unread(), 5)
 end)
 
 print(string.format("\n%d passed, %d failed", passed, failed))
