@@ -14,13 +14,75 @@
 edition:
   title: Daily Brief
   timezone: Asia/Kolkata
-  stories_per_category: 5
+  stories_per_category: 15   # the Kindle shows every story of the topics you pick
   max_per_source: 2          # keep the 5 stories from at least 3 outlets
   user_agent: "Mozilla/5.0 (compatible; daily-brief/1.0)"
   blocked_sources: [The Motley Fool, Zacks, InvestorPlace, Benzinga, Yahoo Finance]
 
+# News topics the Kindle can show. None is shown until you pick topics on
+# the Kindle (Menu > News topics); then every story of those topics shows.
 categories:
+  - id: top
+    title: Top stories
+    short: Top
+    feeds:
+      - { type: google_news, name: Google News, url: "https://news.google.com/rss?hl=en-IN&gl=IN&ceid=IN:en", weight: 1.5 }
+      - { type: rss, name: The Hindu, url: "https://www.thehindu.com/news/feeder/default.rss" }
+      - { type: rss, name: NDTV, url: "https://feeds.feedburner.com/ndtvnews-top-stories" }
+      - { type: rss, name: BBC, url: "https://feeds.bbci.co.uk/news/rss.xml" }
+
+  - id: business
+    title: Business
+    short: Business
+    feeds:
+      - { type: google_news, name: Google News, url: "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=en-IN&gl=IN&ceid=IN:en" }
+      - { type: rss, name: Mint, url: "https://www.livemint.com/rss/companies" }
+      - { type: rss, name: The Hindu, url: "https://www.thehindu.com/business/feeder/default.rss" }
+      - { type: rss, name: BBC, url: "https://feeds.bbci.co.uk/news/business/rss.xml" }
+
+  - id: technology
+    title: Technology
+    short: Tech
+    feeds:
+      - { type: google_news, name: Google News, url: "https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=en-IN&gl=IN&ceid=IN:en" }
+      - { type: rss, name: The Verge, url: "https://www.theverge.com/rss/index.xml" }
+      - { type: rss, name: Ars Technica, url: "https://feeds.arstechnica.com/arstechnica/index" }
+      - { type: rss, name: TechCrunch, url: "https://techcrunch.com/feed/" }
+
+  - id: science
+    title: Science
+    short: Science
+    feeds:
+      - { type: google_news, name: Google News, url: "https://news.google.com/rss/headlines/section/topic/SCIENCE?hl=en-IN&gl=IN&ceid=IN:en" }
+      - { type: rss, name: Quanta Magazine, url: "https://www.quantamagazine.org/feed/", weight: 1.5 }
+      - { type: rss, name: New Scientist, url: "https://www.newscientist.com/feed/home/" }
+      - { type: rss, name: BBC, url: "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml" }
+
+  - id: health
+    title: Health
+    short: Health
+    feeds:
+      - { type: google_news, name: Google News, url: "https://news.google.com/rss/headlines/section/topic/HEALTH?hl=en-IN&gl=IN&ceid=IN:en" }
+      - { type: rss, name: NPR, url: "https://feeds.npr.org/1128/rss.xml" }
+      - { type: rss, name: BBC, url: "https://feeds.bbci.co.uk/news/health/rss.xml" }
+
+  - id: sports
+    title: Sports
+    short: Sports
+    feeds:
+      - { type: google_news, name: Google News, url: "https://news.google.com/rss/headlines/section/topic/SPORTS?hl=en-IN&gl=IN&ceid=IN:en" }
+      - { type: rss, name: The Hindu, url: "https://www.thehindu.com/sport/feeder/default.rss" }
+      - { type: rss, name: BBC, url: "https://feeds.bbci.co.uk/sport/rss.xml" }
+
+  - id: entertainment
+    title: Entertainment
+    short: Films & TV
+    feeds:
+      - { type: google_news, name: Google News, url: "https://news.google.com/rss/headlines/section/topic/ENTERTAINMENT?hl=en-IN&gl=IN&ceid=IN:en" }
+      - { type: rss, name: The Hindu, url: "https://www.thehindu.com/entertainment/feeder/default.rss" }
+      - { type: rss, name: BBC, url: "https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml" }
   - id: ai
+    short: AI
     title: New in AI
     exclude: ["stocks? to buy", "buy before", "price prediction"]   # skip investing clickbait
     feeds:
@@ -34,6 +96,7 @@ categories:
         keywords: [ai, llm, gpt, claude, gemini, openai, anthropic, model, models, neural, agent, agents, machine learning, deepmind, transformer, diffusion]
 
   - id: content_design
+    short: Design
     title: Content Design
     max_age_hours: 168       # a slower field: look back a week
     feeds:
@@ -44,6 +107,7 @@ categories:
       - { type: google_news, name: Google News, url: "https://news.google.com/rss/search?q=%22content+design%22+OR+%22UX+writing%22+OR+%22content+strategy%22+when:7d&hl=en-IN&gl=IN&ceid=IN:en" }
 
   - id: india
+    short: Delhi
     title: Delhi & India
     boost: [delhi, ncr, noida, gurugram, gurgaon]   # Delhi stories rank a little higher
     feeds:
@@ -55,6 +119,7 @@ categories:
       - { type: rss, name: NDTV, url: "https://feeds.feedburner.com/ndtvnews-india-news" }
 
   - id: world
+    short: World
     title: International
     feeds:
       - { type: google_news, name: Google News, url: "https://news.google.com/rss/headlines/section/topic/WORLD?hl=en-IN&gl=IN&ceid=IN:en" }
@@ -65,6 +130,7 @@ categories:
       - { type: rss, name: DW, url: "https://rss.dw.com/rdf/rss-en-world" }
 
   - id: markets
+    short: Stocks
     title: Stocks
     exclude: ["multibagger", "penny stock", "stocks? to buy", "buy or sell", "sell or hold"]
     feeds:
@@ -77,19 +143,64 @@ categories:
 article_of_the_day:
   wikipedia_featured: true
 
-# Index levels and the day's biggest Nifty 50 movers, at the previous close.
-# Uses Yahoo Finance's public chart endpoint: no key, but unofficial, so if it
-# stops working the Kindle just shows the market news without numbers.
-markets:
-  indices:
-    - { symbol: "^NSEI", name: Nifty 50 }
-    - { symbol: "^BSESN", name: Sensex }
-    - { symbol: "^NSEBANK", name: Nifty Bank }
-  movers: 5
-  # Nifty 50 members (update when the index is rebalanced).
-  universe: [ADANIENT, ADANIPORTS, APOLLOHOSP, ASIANPAINT, AXISBANK, BAJAJ-AUTO,
-    BAJFINANCE, BAJAJFINSV, BEL, BHARTIARTL, CIPLA, COALINDIA, DRREDDY, EICHERMOT,
-    ETERNAL, GRASIM, HCLTECH, HDFCBANK, HDFCLIFE, HEROMOTOCO, HINDALCO, HINDUNILVR,
-    ICICIBANK, INDUSINDBK, INFY, ITC, JIOFIN, JSWSTEEL, KOTAKBANK, LT, M&M, MARUTI,
-    NESTLEIND, NTPC, ONGC, POWERGRID, RELIANCE, SBILIFE, SBIN, SHRIRAMFIN, SUNPHARMA,
-    TATACONSUM, TMPV, TATASTEEL, TCS, TECHM, TITAN, TRENT, ULTRACEMCO, WIPRO]
+# Market numbers are no longer shown on the Kindle; the Stocks topic keeps
+# the market news. To bring the numbers back into the brief, restore a
+# `markets:` section (see git history).
+
+# Long reads: at least 5 unread on the Kindle, new ones every morning.
+reads:
+  new_per_day: 5
+  keep: 30            # pieces kept in the pool (the Kindle hides the ones you've read)
+  min_words: 900
+  sources:
+    - { type: links, name: Read Something Great, url: "https://www.readsomethinggreat.com/" }
+    - { type: rss, name: Aeon, url: "https://aeon.co/feed.rss" }
+    - { type: rss, name: Psyche, url: "https://psyche.co/feed" }
+    - { type: rss, name: The Marginalian, url: "https://www.themarginalian.org/feed/" }
+    - { type: rss, name: Longreads, url: "https://longreads.com/feed/" }
+    - { type: rss, name: Nautilus, url: "https://nautil.us/feed/" }
+    - { type: rss, name: Paul Graham, url: "http://www.aaronsw.com/2002/feeds/pgessays.rss" }
+
+# Quote of the day: a passage from a public-domain classic (Project Gutenberg).
+quote:
+  books:
+    - { id: 1342, title: Pride and Prejudice, author: Jane Austen }
+    - { id: 2680, title: Meditations, author: Marcus Aurelius }
+    - { id: 205, title: Walden, author: Henry David Thoreau }
+    - { id: 84, title: Frankenstein, author: Mary Shelley }
+    - { id: 2701, title: Moby-Dick, author: Herman Melville }
+    - { id: 1400, title: Great Expectations, author: Charles Dickens }
+    - { id: 98, title: A Tale of Two Cities, author: Charles Dickens }
+    - { id: 174, title: The Picture of Dorian Gray, author: Oscar Wilde }
+    - { id: 1260, title: Jane Eyre, author: Charlotte Brontë }
+    - { id: 768, title: Wuthering Heights, author: Emily Brontë }
+    - { id: 145, title: Middlemarch, author: George Eliot }
+    - { id: 2554, title: Crime and Punishment, author: Fyodor Dostoevsky }
+    - { id: 28054, title: The Brothers Karamazov, author: Fyodor Dostoevsky }
+    - { id: 1399, title: Anna Karenina, author: Leo Tolstoy }
+    - { id: 2600, title: War and Peace, author: Leo Tolstoy }
+    - { id: 2500, title: Siddhartha, author: Hermann Hesse }
+    - { id: 7164, title: Gitanjali, author: Rabindranath Tagore }
+    - { id: 16643, title: Essays (First Series), author: Ralph Waldo Emerson }
+    - { id: 1497, title: The Republic, author: Plato }
+    - { id: 132, title: The Art of War, author: Sun Tzu }
+    - { id: 1232, title: The Prince, author: Niccolò Machiavelli }
+    - { id: 34901, title: On Liberty, author: John Stuart Mill }
+    - { id: 20203, title: Autobiography, author: Benjamin Franklin }
+    - { id: 64317, title: The Great Gatsby, author: F. Scott Fitzgerald }
+    - { id: 219, title: Heart of Darkness, author: Joseph Conrad }
+    - { id: 1184, title: The Count of Monte Cristo, author: Alexandre Dumas }
+    - { id: 135, title: Les Misérables, author: Victor Hugo }
+    - { id: 996, title: Don Quixote, author: Miguel de Cervantes }
+    - { id: 2814, title: Dubliners, author: James Joyce }
+    - { id: 5200, title: Metamorphosis, author: Franz Kafka }
+    - { id: 19942, title: Candide, author: Voltaire }
+    - { id: 105, title: Persuasion, author: Jane Austen }
+    - { id: 45, title: Anne of Green Gables, author: L. M. Montgomery }
+    - { id: 113, title: The Secret Garden, author: Frances Hodgson Burnett }
+    - { id: 11, title: Alice's Adventures in Wonderland, author: Lewis Carroll }
+    - { id: 1661, title: The Adventures of Sherlock Holmes, author: Arthur Conan Doyle }
+    - { id: 2641, title: A Room with a View, author: E. M. Forster }
+    - { id: 600, title: Notes from Underground, author: Fyodor Dostoevsky }
+    - { id: 2413, title: Madame Bovary, author: Gustave Flaubert }
+    - { id: 4363, title: Beyond Good and Evil, author: Friedrich Nietzsche }

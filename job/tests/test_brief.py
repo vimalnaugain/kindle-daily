@@ -197,11 +197,14 @@ def test_build_end_to_end(tmp_path):
     top = india["stories"][0]
     assert top["title"] == "Delhi metro opens new line to airport"
     assert set(top["also_in"]) >= {"NDTV", "BBC"}
-    assert top["text"] and top["minutes"] >= 1 and not top["summary_only"]
+    assert top["has_text"] and top["minutes"] >= 1 and not top["summary_only"]
+    assert "text" not in top, "texts live in news/<category>.json"
+    assert "Paragraph 0" in brief["_texts"]["news"]["india"][top["id"]]
     short = next(s for s in india["stories"] if "parliament" in s["title"].lower())
     assert short["summary_only"] and short["summary"] == "MPs gather."
-    # The metro story is not repeated under International.
-    assert [s["title"] for s in world["stories"]] == ["Summit agrees climate finance deal"]
+    # Topics are chosen on the Kindle, so a story can be in several topics.
+    assert {s["title"] for s in world["stories"]} == {"Summit agrees climate finance deal",
+                                                      "Delhi metro opens new line to airport, says BBC"}
     broken = next(s for s in brief["sources"] if s["feed"] == "Broken")
     assert not broken["ok"] and "503" in broken["error"]
     # Google News-only stories are never fetched (they are redirects).
@@ -211,6 +214,9 @@ def test_build_end_to_end(tmp_path):
     saved = json.loads((tmp_path / "brief.json").read_text())
     assert saved["version"] == brief["version"] == index["version"]
     assert (tmp_path / "archive" / "2026-11-25.json").exists()
+    assert "_texts" not in saved
+    news = json.loads((tmp_path / "news" / "india.json").read_text())
+    assert top["id"] in news["texts"]
     assert "Delhi & India" in build_mod.summary_report(brief)
 
 
@@ -234,12 +240,17 @@ def test_previous_editions_are_loaded_from_the_site():
 def test_real_config_is_valid():
     cfg = build_mod.load_config(os.path.join(HERE, "..", "config.yml"))
     ids = [c["id"] for c in cfg["categories"]]
-    assert ids == ["ai", "content_design", "india", "world", "markets"]
+    assert ids[:3] == ["top", "business", "technology"] and "ai" in ids and "content_design" in ids
+    assert len(ids) == len(set(ids))
     for c in cfg["categories"]:
+        assert c.get("short"), c["id"]
         for f in c["feeds"]:
             assert f["type"] in ("rss", "google_news", "hn") and f["name"]
             assert f["type"] == "hn" or f["url"].startswith("https://")
-    assert len(cfg["markets"]["universe"]) == 50
+    assert cfg.get("markets") is None
+    assert len(cfg["reads"]["sources"]) >= 5
+    books = cfg["quote"]["books"]
+    assert len(books) >= 30 and len({b["id"] for b in books}) == len(books)
 
 
 # Regressions from the first live run (2026-11-24) ------------------------------
@@ -345,3 +356,91 @@ def test_broken_wikipedia_lead_is_rejoined():
     assert out[0] == ("The **great white shark** (*Carcharodon carcharias*), also known as the "
                       "**white shark, white pointer**, or **great white**, is a large shark.")
     assert out[1:] == ["## Taxonomy", "Next."]
+
+
+
+# Long reads and quote of the day --------------------------------------------------
+
+def essay(title, words=1200):
+    para = " ".join(["word"] * 60)
+    n = words // 60 + 1
+    return (f"<html><body><article><h1>{title}</h1>"
+            + "".join(f"<p>{title} part {i}. {para}.</p>" for i in range(n)) + "</article></body></html>").encode()
+
+
+def test_curated_page_links_are_found():
+    from daily import reads
+    page = (b'<html><body><a href="/about">About us and our mission today</a>'
+            b'<a href="https://www.newyorker.com/magazine/x">The Case for Slowness in a Fast World</a>'
+            b'<a href="https://twitter.com/">Follow us on Twitter please</a>'
+            b'<a href="https://aeon.co/essays/y">Short</a>'
+            b'<a href="https://aeon.co/essays/z">Why we remember some things and forget others</a></body></html>')
+    links = reads.parse_links(page, "https://www.readsomethinggreat.com/", {"name": "RSG"})
+    assert [l[2] for l in links] == ["newyorker.com", "aeon.co"]
+
+
+def test_reads_pool_grows_every_morning_and_never_repeats():
+    from daily import reads
+    def feed(name, n):
+        return rss([(f"{name} essay {i}", f"https://{name}/e{i}", i, "An essay.") for i in range(n)])
+    pages = {"https://a/feed": feed("a", 6), "https://b/feed": feed("b", 6)}
+    for name in ("a", "b"):
+        for i in range(6):
+            pages[f"https://{name}/e{i}"] = essay(f"{name} essay {i}", 300 if i == 0 else 1200)
+    web = FakeWeb(pages)
+    cfg = {"new_per_day": 3, "keep": 5, "min_words": 900, "sources": [
+        {"type": "rss", "name": "A", "url": "https://a/feed"}, {"type": "rss", "name": "B", "url": "https://b/feed"},
+        {"type": "rss", "name": "Down", "url": "https://down/feed"}]}
+    pool, texts, seen, status = reads.refresh(web, cfg, {}, "2026-11-25", log=lambda *a: None)
+    # round-robin across sources; the 300-word piece is too short
+    assert [r["title"] for r in pool] == ["b essay 1", "a essay 1", "a essay 2"] or len(pool) == 3
+    assert {r["source"] for r in pool} == {"A", "B"}
+    assert all(r["id"] in texts and r["minutes"] >= 4 for r in pool)
+    assert not next(s for s in status if s["feed"] == "Down")["ok"]
+    # next morning: new pieces on top, nothing repeated, pool capped at `keep`
+    pool2, texts2, seen2, _ = reads.refresh(web, cfg, {"reads": pool, "seen": seen}, "2026-11-26", log=lambda *a: None)
+    assert len(pool2) == 5
+    assert set(texts2).isdisjoint({r["id"] for r in pool})
+    assert len({r["id"] for r in pool2}) == 5
+
+
+def test_quote_of_the_day_is_a_clean_passage():
+    from daily import quote
+    good = ("It is a truth universally acknowledged, that a single man in possession of a good fortune, "
+            "must be in want of a wife. However little known the feelings or views of such a man may be "
+            "on his first entering a neighbourhood, this truth is so well fixed in the minds of the families.")
+    text = ("The Project Gutenberg eBook of Pride and Prejudice\n\n*** START OF THE PROJECT GUTENBERG EBOOK 1342 ***\n\n"
+            "CHAPTER I.\n\n" + good.replace(", must", ",\nmust") + "\n\n\"Yes.\"\n\n"
+            "[Illustration: a long caption that describes the picture in some detail for readers. Another sentence.]\n\n"
+            "*** END OF THE PROJECT GUTENBERG EBOOK 1342 ***\nLicense text that is long enough to be a passage. And more.")
+    assert quote.passages(text) == [good]
+    web = FakeWeb({quote.GUTENBERG.format(id=1342): text.encode()})
+    q, err = quote.of_the_day(web, [{"id": 1342, "title": "Pride and Prejudice", "author": "Jane Austen"}], "2026-11-25")
+    assert err is None and q["text"] == good and q["book"] == "Pride and Prejudice"
+    q2, _ = quote.of_the_day(web, [{"id": 1342, "title": "Pride and Prejudice", "author": "Jane Austen"}], "2026-11-25")
+    assert q2 == q, "same day, same quote"
+    assert quote.of_the_day(FakeWeb({}), [{"id": 1, "title": "X", "author": "Y"}], "2026-11-25")[0] is None
+
+
+def test_build_with_reads_and_quote(tmp_path):
+    from daily import quote
+    cfg = dict(CONFIG)
+    cfg["reads"] = {"new_per_day": 2, "keep": 10, "min_words": 900,
+                    "sources": [{"type": "rss", "name": "A", "url": "https://a/feed"}]}
+    cfg["quote"] = {"books": [{"id": 7, "title": "Book", "author": "Author"}]}
+    web = site_web()
+    web.pages["https://a/feed"] = rss([("Essay one", "https://a/1", 1, "x"), ("Essay two", "https://a/2", 2, "y")])
+    web.pages["https://a/1"] = essay("Essay one")
+    web.pages["https://a/2"] = essay("Essay two")
+    web.pages[quote.GUTENBERG.format(id=7)] = ("One sentence here that is long enough to be counted as prose. " * 4).encode()
+    # yesterday's site: one read whose text must be carried over
+    web.pages["https://me.github.io/daily/brief.json"] = json.dumps({"reads": [
+        {"id": "old1", "title": "Old essay", "source": "A", "url": "https://a/old", "summary": "", "words": 2000,
+         "minutes": 9, "added": "2026-11-24"}], "reads_seen": {"old1": "2026-11-24"}}).encode()
+    web.pages["https://me.github.io/daily/reads/old1.json"] = json.dumps({"id": "old1", "text": "Old text"}).encode()
+    brief = build_mod.build(cfg, web, now=NOW, previous_site="https://me.github.io/daily/")
+    assert [r["title"] for r in brief["reads"]] == ["Essay one", "Essay two", "Old essay"]
+    assert brief["quote"]["book"] == "Book"
+    build_mod.write_site(brief, tmp_path)
+    assert json.loads((tmp_path / "reads" / "old1.json").read_text())["text"] == "Old text"
+    assert len(list((tmp_path / "reads").iterdir())) == 3

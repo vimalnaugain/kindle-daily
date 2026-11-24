@@ -3,7 +3,11 @@
     python -m daily.build --config config.yml --out site [--previous https://<pages-site>/]
 
 Writes:
-  site/brief.json              today's edition (what the Kindle downloads)
+  site/brief.json              today's edition: headlines, long reads, quote
+                               (no article texts: the Kindle downloads those
+                               only for the topics and reads it shows)
+  site/news/<category>.json    full texts of a category's stories
+  site/reads/<id>.json         full text of a long read
   site/archive/YYYY-MM-DD.json the last 7 editions
   site/index.json              {latest, version, dates}
 """
@@ -21,11 +25,13 @@ import yaml
 from . import extract as extract_mod
 from . import feeds as feeds_mod
 from . import markets as markets_mod
+from . import quote as quote_mod
 from . import rank
+from . import reads as reads_mod
 from . import wiki
 from .fetch import Fetcher
 
-SCHEMA = 1
+SCHEMA = 2
 KEEP_DAYS = 7
 WORDS_PER_MINUTE = 230
 
@@ -151,7 +157,7 @@ def story_json(story, text, why_no_text):
         "url": lead.url,
         "published": iso(max((it.published for it in story.items if it.published), default=None)),
         "summary": summary,
-        "text": text,
+        "has_text": text is not None,
         "words": words,
         "minutes": max(1, round(words / WORDS_PER_MINUTE)) if words else 0,
         "summary_only": text is None,
@@ -165,11 +171,23 @@ def story_json(story, text, why_no_text):
     return out
 
 
-def build(config, fetcher, now=None):
+def load_previous_reads(fetcher, base_url):
+    """Yesterday's long-reads pool and the ids already used, from the live site."""
+    if not base_url:
+        return {}
+    try:
+        prev = json.loads(fetcher.get(base_url.rstrip("/") + "/brief.json").body)
+    except Exception as e:
+        log(f"  no previous brief ({e})")
+        return {}
+    return {"reads": prev.get("reads") or [], "seen": prev.get("reads_seen") or {}}
+
+
+def build(config, fetcher, now=None, previous_site=None):
     now = now or datetime.now(timezone.utc)
     ed = config.get("edition", {})
     tz = ZoneInfo(ed.get("timezone", "UTC"))
-    n = int(ed.get("stories_per_category", 5))
+    n = int(ed.get("stories_per_category", 15))
     categories = config["categories"]
 
     log("Fetching feeds")
@@ -177,7 +195,7 @@ def build(config, fetcher, now=None):
 
     log("Ranking and extracting")
     by_cat = {c["id"]: [it for f in c["feeds"] for it in results.get((c["id"], f["name"]), [])] for c in categories}
-    used_urls, used_tokens, used_topics, out_cats = set(), [], [], []
+    used_urls, used_tokens, used_topics, out_cats, texts_out = set(), [], [], [], {}
     with ThreadPoolExecutor(max_workers=8) as pool:
         for cat in categories:
             items = by_cat[cat["id"]]
@@ -186,8 +204,8 @@ def build(config, fetcher, now=None):
             candidates = rank.pick(
                 items, 2 * n, now=now, max_age_hours=cat.get("max_age_hours", 36),
                 max_per_source=ed.get("max_per_source", 2), boost=cat.get("boost", ()),
-                exclude_urls=used_urls, exclude_tokens=used_tokens, elsewhere=elsewhere,
-                exclude_topics=used_topics, blocked_sources=ed.get("blocked_sources", ()),
+                elsewhere=elsewhere,  # topics are picked on the Kindle: no cross-topic exclusion
+                blocked_sources=ed.get("blocked_sources", ()),
                 exclude_patterns=cat.get("exclude", ()))
             pages = list(pool.map(lambda st: download_article(fetcher, st), candidates))
             texts = [fetch_article(fetcher, st, pg) for st, pg in zip(candidates, pages)]
@@ -197,8 +215,10 @@ def build(config, fetcher, now=None):
                 used_urls.add(st.lead.url)
                 used_tokens.append(st.tokens)
                 used_topics.append(st.names)
-            out_cats.append({"id": cat["id"], "title": cat["title"],
-                             "stories": [story_json(st, text, why) for st, text, why in chosen]})
+            stories = [story_json(st, text, why) for st, text, why in chosen]
+            texts_out[cat["id"]] = {sj["id"]: text for sj, (_, text, _) in zip(stories, chosen) if text}
+            out_cats.append({"id": cat["id"], "title": cat["title"], "short": cat.get("short", cat["title"]),
+                             "stories": stories})
             readable = sum(1 for _, text, _ in chosen if text)
             log(f"  {cat['id']:15} {len(items):4} items -> {len(chosen)} stories ({readable} with full text)")
 
@@ -218,6 +238,40 @@ def build(config, fetcher, now=None):
                        **({"error": art_err} if art_err else {})})
         if article:
             article["id"] = story_id(article["url"])
+    today = local.strftime("%Y-%m-%d")
+    read_texts = {}
+    reads, seen = [], {}
+    if config.get("reads"):
+        log("Long reads")
+        prev = load_previous_reads(fetcher, previous_site)
+        if article and article.get("text") and article["id"] not in (prev.get("seen") or {}):
+            # the Wikipedia featured article joins the long reads too
+            prev.setdefault("reads", [])
+            wiki_meta = {k: article[k] for k in ("id", "title", "source", "url", "summary", "words", "minutes")}
+            wiki_meta["added"], wiki_meta["label"] = today, "Featured article"
+            prev["reads"] = [wiki_meta] + [r for r in prev["reads"] if r["id"] != article["id"]]
+            prev.setdefault("seen", {})[article["id"]] = today
+            read_texts[article["id"]] = article["text"]
+        reads, new_texts, seen, rstatus = reads_mod.refresh(fetcher, config["reads"], prev, today, log)
+        status.extend(rstatus)
+        read_texts.update(new_texts)
+        # texts of pieces carried over from earlier days come from the live site
+        for r in reads:
+            if r["id"] not in read_texts and previous_site:
+                try:
+                    old = json.loads(fetcher.get(previous_site.rstrip("/") + f"/reads/{r['id']}.json").body)
+                    read_texts[r["id"]] = old["text"]
+                except Exception as e:
+                    log(f"  lost text of read {r['id']} ({e})")
+        reads = [r for r in reads if r["id"] in read_texts]
+
+    quote = None
+    if config.get("quote"):
+        log("Quote of the day")
+        quote, q_err = quote_mod.of_the_day(fetcher, config["quote"].get("books", []), today)
+        status.append({"category": "quote", "feed": "Project Gutenberg", "ok": quote is not None,
+                       **({"error": q_err} if q_err else {})})
+
     brief = {
         "schema": SCHEMA,
         "title": ed.get("title", "Daily Brief"),
@@ -226,11 +280,17 @@ def build(config, fetcher, now=None):
         "timezone": ed.get("timezone", "UTC"),
         "categories": out_cats,
         "markets": markets,
-        "article": article,
+        "article": {k: v for k, v in article.items() if k != "text"} if article else None,
+        "reads": reads,
+        "reads_seen": seen,
+        "quote": quote,
         "sources": status,
     }
     brief["version"] = hashlib.sha1(json.dumps(
-        [brief["categories"], brief["markets"], brief["article"]], sort_keys=True).encode()).hexdigest()[:12]
+        [brief["categories"], brief["markets"], brief["article"], brief["reads"], brief["quote"]],
+        sort_keys=True).encode()).hexdigest()[:12]
+    # full texts, written next to the brief by write_site
+    brief["_texts"] = {"news": texts_out, "reads": read_texts}
     return brief
 
 
@@ -257,6 +317,15 @@ def load_previous(fetcher, base_url, today):
 
 def write_site(brief, out_dir, previous=None):
     os.makedirs(os.path.join(out_dir, "archive"), exist_ok=True)
+    texts = brief.pop("_texts", {"news": {}, "reads": {}})
+    os.makedirs(os.path.join(out_dir, "news"), exist_ok=True)
+    os.makedirs(os.path.join(out_dir, "reads"), exist_ok=True)
+    for cat_id, by_id in texts["news"].items():
+        with open(os.path.join(out_dir, "news", f"{cat_id}.json"), "w", encoding="utf-8") as f:
+            json.dump({"category": cat_id, "date": brief["date"], "texts": by_id}, f, ensure_ascii=False, separators=(",", ":"))
+    for rid, text in texts["reads"].items():
+        with open(os.path.join(out_dir, "reads", f"{rid}.json"), "w", encoding="utf-8") as f:
+            json.dump({"id": rid, "text": text}, f, ensure_ascii=False, separators=(",", ":"))
     data = json.dumps(brief, ensure_ascii=False, separators=(",", ":")).encode()
     today = brief["date"]
     keep_from = (datetime.strptime(today, "%Y-%m-%d") - timedelta(days=KEEP_DAYS - 1)).strftime("%Y-%m-%d")
@@ -281,7 +350,7 @@ def summary_report(brief):
     for c in brief["categories"]:
         lines.append(f"## {c['title']}")
         for i, s in enumerate(c["stories"], 1):
-            note = (f"{s['minutes']} min" if s["text"] else
+            note = (f"{s['minutes']} min" if s["has_text"] else
                     f"summary only ({len(s['summary'])} chars): {s.get('no_text_reason', '')}")
             also = f" (+{len(s['also_in'])} more)" if s["also_in"] else ""
             lines.append(f"{i}. {s['title']} ({s['source']}{also}, {note})")
@@ -298,10 +367,18 @@ def summary_report(brief):
         lines += [f"Movers: {movers} ({m['covered']}{missing})", ""]
     full = [f"{s['feed']} ({s['full_text_in_feed']})" for s in brief["sources"] if s.get("full_text_in_feed")]
     lines += [f"Feeds carrying full text: {', '.join(full) or 'none'}", ""]
+    if brief.get("reads"):
+        lines.append("## Long reads (newest first)")
+        for r in brief["reads"][:10]:
+            lines.append(f"- {r['title']} ({r['source']}, {r['minutes']} min, added {r['added']})")
+        lines.append("")
+    q = brief.get("quote")
+    if q:
+        lines += [f"Quote: “{q['text'][:140]}…” ({q['book']}, {q['author']})", ""]
     art = brief.get("article")
     if art:
         lines += [f"Article of the day: {art['title']} (Wikipedia, "
-                  + (f"{art['minutes']} min)" if art.get("text") else "summary only)"), ""]
+                  + (f"{art['minutes']} min)" if art.get("words") else "summary only)"), ""]
     bad = [s for s in brief["sources"] if not s["ok"]]
     lines.append(f"Sources: {len(brief['sources']) - len(bad)} ok, {len(bad)} failed")
     for s in bad:
@@ -318,7 +395,7 @@ def main(argv=None):
     args = ap.parse_args(argv)
     config = load_config(args.config)
     fetcher = Fetcher(config.get("edition", {}).get("user_agent", "daily-brief/1.0"))
-    brief = build(config, fetcher)
+    brief = build(config, fetcher, previous_site=args.previous)
     if not any(c["stories"] for c in brief["categories"]):
         log("No stories at all: not publishing an empty edition.")
         return 1
