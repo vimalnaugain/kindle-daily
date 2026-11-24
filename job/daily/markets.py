@@ -56,5 +56,6 @@ def collect(fetcher, cfg):
         "losers": [q for q in reversed(quotes[-n:]) if q["change_pct"] < 0],
         "as_of": max(times) if times else None,
         "covered": f"{len(quotes)} of {len(universe)} Nifty 50 stocks",
+        "missing": sorted(set(universe) - {q["name"] for q in quotes}),
     }
     return data, None

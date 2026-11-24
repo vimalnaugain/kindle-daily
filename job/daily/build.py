@@ -259,7 +259,8 @@ def summary_report(brief):
         lines.append("")
     if m:
         movers = ", ".join(f"{q['name']} {q['change_pct']:+.1f}%" for q in m["gainers"] + m["losers"])
-        lines += [f"Movers: {movers} ({m['covered']})", ""]
+        missing = f"; no data for {', '.join(m['missing'])}" if m.get("missing") else ""
+        lines += [f"Movers: {movers} ({m['covered']}{missing})", ""]
     full = [f"{s['feed']} ({s['full_text_in_feed']})" for s in brief["sources"] if s.get("full_text_in_feed")]
     lines += [f"Feeds carrying full text: {', '.join(full) or 'none'}", ""]
     bad = [s for s in brief["sources"] if not s["ok"]]
