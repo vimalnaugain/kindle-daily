@@ -432,7 +432,8 @@ def test_build_with_reads_and_quote(tmp_path):
     web.pages["https://a/feed"] = rss([("Essay one", "https://a/1", 1, "x"), ("Essay two", "https://a/2", 2, "y")])
     web.pages["https://a/1"] = essay("Essay one")
     web.pages["https://a/2"] = essay("Essay two")
-    web.pages[quote.GUTENBERG.format(id=7)] = ("One sentence here that is long enough to be counted as prose. " * 4).encode()
+    web.pages[quote.GUTENBERG.format(id=7)] = ("Happiness is not a thing to be pursued for itself. All the great truths "
+                                               "of life must be lived to be known. Every man knows this.").encode()
     # yesterday's site: one read whose text must be carried over
     web.pages["https://me.github.io/daily/brief.json"] = json.dumps({"reads": [
         {"id": "old1", "title": "Old essay", "source": "A", "url": "https://a/old", "summary": "", "words": 2000,
@@ -461,3 +462,12 @@ def test_lonely_headlines_are_dropped():
                                 mk("Election results are announced", "B", kind="google", url="https://news.google.com/z")])
     chosen = build_mod.choose([(lonely, None, "g"), (covered, None, "g")], 5, 2)
     assert [r[0] for r in chosen] == [covered]
+
+
+def test_lists_of_names_are_not_quotes():
+    from daily import quote
+    names = ("From East Egg, then, came the Chester Beckers and the Leeches, and a man named Bunsen, whom I knew "
+             "at Yale, and Doctor Webster Civet, who was drowned last summer up in Maine. And the Hornbeams all came.")
+    wise = "Happiness is not a thing to be pursued for itself. All the great truths of life must be lived to be known. Every man knows this."
+    assert quote.score(names) < quote.MIN_SCORE <= quote.score(wise)
+    assert quote.pick("2026-11-25", [names]) is None, "no quotable passage: try another book"

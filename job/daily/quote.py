@@ -62,14 +62,26 @@ def score(p):
     if _NARRATIVE_START.match(p):
         s -= 2                       # continues a scene
     s -= len(re.findall(r"\b(he|she|him|her|said|replied|cried)\b", p, re.I)) * 0.5
+    # names mid-sentence (lists of people and places read badly out of context)
+    names = re.findall(r"(?<![.!?]\s)(?<!^)\b[A-Z][a-z]+", p)
+    s -= max(0, len(names) - 2) * 1.0
     return s
+
+MIN_SCORE = 2
+
+
+def best_passages(items):
+    good = [p for p in items if score(p) >= MIN_SCORE]
+    return sorted(good, key=score, reverse=True)[:max(1, len(good) // 10)]
 
 
 def pick(day, items):
     """The day's passage among the most quotable ones."""
     if not items:
         return None
-    best = sorted(items, key=score, reverse=True)[:max(1, len(items) // 20)]
+    best = best_passages(items)
+    if not best:
+        return None
     h = int(hashlib.sha1(day.encode()).hexdigest(), 16)
     return best[h % len(best)]
 
