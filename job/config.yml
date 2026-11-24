@@ -1,0 +1,88 @@
+# What the morning job collects. Edit freely; the Kindle shows categories in
+# this order. Everything here is public: put nothing personal in this file.
+#
+# Feed types:
+#   rss          any RSS/Atom feed
+#   google_news  a Google News RSS feed (links are Google redirects, so these
+#                mostly count as "coverage" for ranking; full text comes from
+#                a direct feed covering the same story)
+#   hn           Hacker News front page (needs `keywords` to filter by topic)
+#
+# weight: how much a feed's front-page position counts (default 1.0)
+# max_age_hours: ignore older items (per category; default 36)
+
+edition:
+  title: Daily Brief
+  timezone: Asia/Kolkata
+  stories_per_category: 5
+  max_per_source: 2          # keep the 5 stories from at least 3 outlets
+  user_agent: "Mozilla/5.0 (compatible; daily-brief/1.0)"
+
+categories:
+  - id: ai
+    title: New in AI
+    feeds:
+      - { type: google_news, name: Google News, url: "https://news.google.com/rss/search?q=%22artificial+intelligence%22+OR+%22AI+model%22+when:1d&hl=en-IN&gl=IN&ceid=IN:en" }
+      - { type: rss, name: TechCrunch, url: "https://techcrunch.com/category/artificial-intelligence/feed/" }
+      - { type: rss, name: The Verge, url: "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml" }
+      - { type: rss, name: MIT Technology Review, url: "https://www.technologyreview.com/topic/artificial-intelligence/feed" }
+      - { type: rss, name: VentureBeat, url: "https://venturebeat.com/category/ai/feed/" }
+      - type: hn
+        name: Hacker News
+        keywords: [ai, llm, gpt, claude, gemini, openai, anthropic, model, models, neural, agent, agents, machine learning, deepmind, transformer, diffusion]
+
+  - id: content_design
+    title: Content Design
+    max_age_hours: 168       # a slower field: look back a week
+    feeds:
+      - { type: rss, name: Nielsen Norman Group, url: "https://www.nngroup.com/feed/rss/", weight: 1.5 }
+      - { type: rss, name: UX Collective, url: "https://uxdesign.cc/feed" }
+      - { type: rss, name: Smashing Magazine, url: "https://www.smashingmagazine.com/feed/" }
+      - { type: rss, name: A List Apart, url: "https://alistapart.com/main/feed/" }
+      - { type: google_news, name: Google News, url: "https://news.google.com/rss/search?q=%22content+design%22+OR+%22UX+writing%22+OR+%22content+strategy%22+when:7d&hl=en-IN&gl=IN&ceid=IN:en" }
+
+  - id: india
+    title: Delhi & India
+    boost: [delhi, ncr, noida, gurugram, gurgaon]   # Delhi stories rank a little higher
+    feeds:
+      - { type: google_news, name: Google News, url: "https://news.google.com/rss/headlines/section/topic/NATION?hl=en-IN&gl=IN&ceid=IN:en" }
+      - { type: google_news, name: Google News Delhi, url: "https://news.google.com/rss/search?q=Delhi+when:1d&hl=en-IN&gl=IN&ceid=IN:en" }
+      - { type: rss, name: The Hindu, url: "https://www.thehindu.com/news/national/feeder/default.rss" }
+      - { type: rss, name: The Indian Express, url: "https://indianexpress.com/section/cities/delhi/feed/" }
+      - { type: rss, name: Hindustan Times, url: "https://www.hindustantimes.com/feeds/rss/cities/delhi-news/rssfeed.xml" }
+      - { type: rss, name: NDTV, url: "https://feeds.feedburner.com/ndtvnews-india-news" }
+
+  - id: world
+    title: International
+    feeds:
+      - { type: google_news, name: Google News, url: "https://news.google.com/rss/headlines/section/topic/WORLD?hl=en-IN&gl=IN&ceid=IN:en" }
+      - { type: rss, name: BBC, url: "https://feeds.bbci.co.uk/news/world/rss.xml" }
+      - { type: rss, name: Al Jazeera, url: "https://www.aljazeera.com/xml/rss/all.xml" }
+      - { type: rss, name: The Guardian, url: "https://www.theguardian.com/world/rss" }
+      - { type: rss, name: NPR, url: "https://feeds.npr.org/1004/rss.xml" }
+      - { type: rss, name: DW, url: "https://rss.dw.com/rdf/rss-en-world" }
+
+  - id: markets
+    title: Stocks
+    feeds:
+      - { type: google_news, name: Google News, url: "https://news.google.com/rss/search?q=Sensex+OR+Nifty+OR+stocks+when:1d&hl=en-IN&gl=IN&ceid=IN:en" }
+      - { type: rss, name: ET Markets, url: "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms" }
+      - { type: rss, name: Mint, url: "https://www.livemint.com/rss/markets" }
+      - { type: rss, name: Moneycontrol, url: "https://www.moneycontrol.com/rss/marketreports.xml" }
+
+# Index levels and the day's biggest Nifty 50 movers, at the previous close.
+# Uses Yahoo Finance's public chart endpoint: no key, but unofficial, so if it
+# stops working the Kindle just shows the market news without numbers.
+markets:
+  indices:
+    - { symbol: "^NSEI", name: Nifty 50 }
+    - { symbol: "^BSESN", name: Sensex }
+    - { symbol: "^NSEBANK", name: Nifty Bank }
+  movers: 5
+  # Nifty 50 members (update when the index is rebalanced).
+  universe: [ADANIENT, ADANIPORTS, APOLLOHOSP, ASIANPAINT, AXISBANK, BAJAJ-AUTO,
+    BAJFINANCE, BAJAJFINSV, BEL, BHARTIARTL, CIPLA, COALINDIA, DRREDDY, EICHERMOT,
+    ETERNAL, GRASIM, HCLTECH, HDFCBANK, HDFCLIFE, HEROMOTOCO, HINDALCO, HINDUNILVR,
+    ICICIBANK, INDUSINDBK, INFY, ITC, JIOFIN, JSWSTEEL, KOTAKBANK, LT, M&M, MARUTI,
+    NESTLEIND, NTPC, ONGC, POWERGRID, RELIANCE, SBILIFE, SBIN, SHRIRAMFIN, SUNPHARMA,
+    TATACONSUM, TATAMOTORS, TATASTEEL, TCS, TECHM, TITAN, TRENT, ULTRACEMCO, WIPRO]
