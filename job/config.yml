@@ -73,6 +73,10 @@ categories:
       - { type: rss, name: Mint, url: "https://www.livemint.com/rss/markets" }
       - { type: rss, name: Moneycontrol, url: "https://www.moneycontrol.com/rss/marketreports.xml" }
 
+# A free long read for the dashboard: Wikipedia's featured article of the day.
+article_of_the_day:
+  wikipedia_featured: true
+
 # Index levels and the day's biggest Nifty 50 movers, at the previous close.
 # Uses Yahoo Finance's public chart endpoint: no key, but unofficial, so if it
 # stops working the Kindle just shows the market news without numbers.

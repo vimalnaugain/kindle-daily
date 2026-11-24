@@ -312,3 +312,27 @@ def test_headline_with_different_quotes_is_not_repeated():
         "<h1>Court rejects bail plea of PG operator</h1>", "<h2>Court rejects bail plea of PG\u00a0operator</h2>")
     text, _ = extract.extract(page, "https://a/3", "Court rejects bail plea of PG operator")
     assert not text.startswith("#")
+
+
+def test_wikipedia_featured_article(tmp_path):
+    from datetime import date
+    from daily import wiki
+    feed_url = wiki.FEED.format(date(2026, 11, 25))
+    body = "".join(f"<p>Paragraph {i} about the Lighthouse at Gull's Reach and its keepers over two centuries.[{i}]</p>"
+                   for i in range(12))
+    page = (f"<html><body><article><h1>Gull's Reach Light</h1>{body}<h2>References</h2>"
+            f"<p>Smith, J. (1901). A history of lights, with a long list of references and sources here.</p>"
+            f"</article></body></html>").encode()
+    web = FakeWeb({
+        feed_url: json.dumps({"tfa": {"titles": {"normalized": "Gull's Reach Light"},
+            "description": "Lighthouse in Cornwall", "extract": "Gull's Reach Light is a lighthouse.",
+            "content_urls": {"desktop": {"page": "https://en.wikipedia.org/wiki/Gull%27s_Reach_Light"}}}}).encode(),
+        "https://en.wikipedia.org/wiki/Gull%27s_Reach_Light": page,
+    })
+    art, err = wiki.featured(web, date(2026, 11, 25))
+    assert err is None and art["title"] == "Gull's Reach Light" and art["source"] == "Wikipedia"
+    assert "Paragraph 11" in art["text"] and "[3]" not in art["text"]
+    assert "Smith" not in art["text"] and "References" not in art["text"]
+    assert art["minutes"] >= 1 and not art["summary_only"]
+    art, err = wiki.featured(FakeWeb({}), date(2026, 11, 25))
+    assert art is None and err

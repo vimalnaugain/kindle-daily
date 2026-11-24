@@ -22,6 +22,7 @@ from . import extract as extract_mod
 from . import feeds as feeds_mod
 from . import markets as markets_mod
 from . import rank
+from . import wiki
 from .fetch import Fetcher
 
 SCHEMA = 1
@@ -209,6 +210,14 @@ def build(config, fetcher, now=None):
                        **({"error": markets_err} if markets_err else {})})
 
     local = now.astimezone(tz)
+    article = None
+    if config.get("article_of_the_day", {}).get("wikipedia_featured", True):
+        log("Article of the day")
+        article, art_err = wiki.featured(fetcher, local.date())
+        status.append({"category": "article", "feed": "Wikipedia featured", "ok": article is not None,
+                       **({"error": art_err} if art_err else {})})
+        if article:
+            article["id"] = story_id(article["url"])
     brief = {
         "schema": SCHEMA,
         "title": ed.get("title", "Daily Brief"),
@@ -217,10 +226,11 @@ def build(config, fetcher, now=None):
         "timezone": ed.get("timezone", "UTC"),
         "categories": out_cats,
         "markets": markets,
+        "article": article,
         "sources": status,
     }
     brief["version"] = hashlib.sha1(json.dumps(
-        [brief["categories"], brief["markets"]], sort_keys=True).encode()).hexdigest()[:12]
+        [brief["categories"], brief["markets"], brief["article"]], sort_keys=True).encode()).hexdigest()[:12]
     return brief
 
 
@@ -288,6 +298,10 @@ def summary_report(brief):
         lines += [f"Movers: {movers} ({m['covered']}{missing})", ""]
     full = [f"{s['feed']} ({s['full_text_in_feed']})" for s in brief["sources"] if s.get("full_text_in_feed")]
     lines += [f"Feeds carrying full text: {', '.join(full) or 'none'}", ""]
+    art = brief.get("article")
+    if art:
+        lines += [f"Article of the day: {art['title']} (Wikipedia, "
+                  + (f"{art['minutes']} min)" if art.get("text") else "summary only)"), ""]
     bad = [s for s in brief["sources"] if not s["ok"]]
     lines.append(f"Sources: {len(brief['sources']) - len(bad)} ok, {len(bad)} failed")
     for s in bad:
