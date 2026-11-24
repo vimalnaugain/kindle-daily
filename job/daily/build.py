@@ -269,6 +269,11 @@ def build(config, fetcher, now=None, previous_site=None):
     if config.get("quote"):
         log("Quote of the day")
         quote, q_err = quote_mod.of_the_day(fetcher, config["quote"].get("books", []), today)
+        if not quote and previous_site:  # keep yesterday's rather than none
+            try:
+                quote = json.loads(fetcher.get(previous_site.rstrip("/") + "/brief.json").body).get("quote")
+            except Exception:
+                pass
         status.append({"category": "quote", "feed": "Project Gutenberg", "ok": quote is not None,
                        **({"error": q_err} if q_err else {})})
 

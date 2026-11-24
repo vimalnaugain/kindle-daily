@@ -6,6 +6,10 @@ import hashlib
 import re
 
 GUTENBERG = "https://www.gutenberg.org/cache/epub/{id}/pg{id}.txt"
+# Project Gutenberg's own mirrors, tried when the main site is busy
+MIRRORS = [GUTENBERG,
+           "https://gutenberg.pglaf.org/cache/epub/{id}/pg{id}.txt",
+           "https://aleph.pglaf.org/cache/epub/{id}/pg{id}.txt"]
 BOOK_PAGE = "https://www.gutenberg.org/ebooks/{id}"
 
 _START = re.compile(r"\*\*\*\s*START OF (THE|THIS) PROJECT GUTENBERG.*?\*\*\*", re.I | re.S)
@@ -59,11 +63,15 @@ def of_the_day(fetcher, books, day):
     last_err = None
     for k in range(4):
         book = books[(h + k * 7) % len(books)]
-        try:
-            raw = fetcher.get(GUTENBERG.format(id=book["id"]), accept="text/plain").body
-            text = raw.decode("utf-8-sig", errors="replace")
-        except Exception as e:
-            last_err = f"{book['title']}: {str(e)[:80]}"
+        text = None
+        for mirror in MIRRORS:
+            try:
+                raw = fetcher.get(mirror.format(id=book["id"]), accept="text/plain").body
+                text = raw.decode("utf-8-sig", errors="replace")
+                break
+            except Exception as e:
+                last_err = f"{book['title']}: {str(e)[:80]}"
+        if text is None:
             continue
         p = pick(day, passages(text))
         if p:
