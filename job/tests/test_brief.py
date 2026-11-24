@@ -294,3 +294,14 @@ def test_full_text_from_the_feed_when_the_site_blocks_us():
     web = FakeWeb({"https://uxdesign.cc/a": FetchError("HTTP 403")})
     text, err = build_mod.fetch_article(web, story)
     assert err is None and "Paragraph 29" in text
+
+
+def test_unreadable_candidates_are_replaced():
+    a, b, c, d = (rank.Story(items=[mk(t, src)]) for t, src in
+                  [("Tweet about open models", "Hacker News"), ("Release notes page", "Hacker News"),
+                   ("Research lab ships model", "TechCrunch"), ("Chip export rules change", "The Verge")])
+    d.items[0].summary = "A real summary of the export rules story, long enough to be useful on its own here."
+    rows = [(a, None, "no text"), (b, None, "no text"), (c, "Full text", None), (d, None, "403")]
+    chosen = build_mod.choose(rows, 2, max_per_source=2)
+    assert [r[0] for r in chosen] == [c, d]  # readable first, then a real summary; rank order kept
+    assert len(build_mod.choose(rows, 4, 2)) == 4  # falls back to headline-only when short

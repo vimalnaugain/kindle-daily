@@ -66,6 +66,7 @@ categories:
 
   - id: markets
     title: Stocks
+    exclude: ["multibagger", "penny stock", "stocks? to buy", "buy or sell", "sell or hold"]
     feeds:
       - { type: google_news, name: Google News, url: "https://news.google.com/rss/search?q=Sensex+OR+Nifty+OR+stocks+when:1d&hl=en-IN&gl=IN&ceid=IN:en" }
       - { type: rss, name: ET Markets, url: "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms" }

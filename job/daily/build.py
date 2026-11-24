@@ -55,8 +55,9 @@ def fetch_feeds(fetcher, categories):
     with ThreadPoolExecutor(max_workers=8) as pool:
         for (cat, feed), items, err in pool.map(run, jobs):
             results[(cat["id"], feed["name"])] = items
+            full = sum(1 for it in items if it.extra.get("content_html"))
             status.append({"category": cat["id"], "feed": feed["name"], "ok": err is None,
-                           "items": len(items), **({"error": err} if err else {})})
+                           "items": len(items), "full_text_in_feed": full, **({"error": err} if err else {})})
             log(f"  {'ok ' if err is None else 'ERR'} {cat['id']:15} {feed['name']:25} {len(items):3} {err or ''}")
     return results, status
 
@@ -79,6 +80,30 @@ def fetch_article(fetcher, story):
         if text:
             err = None
     return text, err
+
+
+def has_summary(story):
+    return any(len(it.summary) >= 80 for it in story.items)
+
+
+def choose(rows, n, max_per_source):
+    """rows: (story, text, why) in rank order. Prefer stories the reader can
+    actually read: full text, then a real summary, then headline only. Keeps
+    rank order among the chosen ones."""
+    tiers = [
+        [r for r in rows if r[1]],
+        [r for r in rows if not r[1] and has_summary(r[0])],
+        [r for r in rows if not r[1] and not has_summary(r[0])],
+    ]
+    chosen, per_source = [], {}
+    for tier in tiers:
+        for r in tier:
+            src = r[0].lead.source
+            if len(chosen) < n and per_source.get(src, 0) < max_per_source:
+                chosen.append(r)
+                per_source[src] = per_source.get(src, 0) + 1
+    order = {id(r[0]): i for i, r in enumerate(rows)}
+    return sorted(chosen, key=lambda r: order[id(r[0])])
 
 
 def story_id(url):
@@ -125,36 +150,31 @@ def build(config, fetcher, now=None):
     log("Fetching feeds")
     results, status = fetch_feeds(fetcher, categories)
 
-    log("Ranking")
-    picked, used_urls, used_tokens, used_topics = [], set(), [], []
+    log("Ranking and extracting")
     by_cat = {c["id"]: [it for f in c["feeds"] for it in results.get((c["id"], f["name"]), [])] for c in categories}
-    for cat in categories:
-        items = by_cat[cat["id"]]
-        elsewhere = [it for cid, its in by_cat.items() if cid != cat["id"] for it in its]
-        stories = rank.pick(items, n, now=now, max_age_hours=cat.get("max_age_hours", 36),
-                            max_per_source=ed.get("max_per_source", 2), boost=cat.get("boost", ()),
-                            exclude_urls=used_urls, exclude_tokens=used_tokens, elsewhere=elsewhere,
-                            exclude_topics=used_topics, blocked_sources=ed.get("blocked_sources", ()),
-                            exclude_patterns=cat.get("exclude", ()))
-        for s in stories:
-            used_urls.add(s.lead.url)
-            used_tokens.append(s.tokens)
-            used_topics.append(s.names)
-        picked.append((cat, stories))
-        log(f"  {cat['id']:15} {len(items):4} items -> {len(stories)} stories")
-
-    log("Extracting articles")
-    flat = [s for _, ss in picked for s in ss]
+    used_urls, used_tokens, used_topics, out_cats = set(), [], [], []
     with ThreadPoolExecutor(max_workers=8) as pool:
-        texts = dict(zip(map(id, flat), pool.map(lambda s: fetch_article(fetcher, s), flat)))
-
-    out_cats = []
-    for cat, stories in picked:
-        out_cats.append({
-            "id": cat["id"],
-            "title": cat["title"],
-            "stories": [story_json(s, *texts[id(s)]) for s in stories],
-        })
+        for cat in categories:
+            items = by_cat[cat["id"]]
+            elsewhere = [it for cid, its in by_cat.items() if cid != cat["id"] for it in its]
+            # Twice as many candidates as needed, so unreadable ones can be replaced.
+            candidates = rank.pick(
+                items, 2 * n, now=now, max_age_hours=cat.get("max_age_hours", 36),
+                max_per_source=ed.get("max_per_source", 2), boost=cat.get("boost", ()),
+                exclude_urls=used_urls, exclude_tokens=used_tokens, elsewhere=elsewhere,
+                exclude_topics=used_topics, blocked_sources=ed.get("blocked_sources", ()),
+                exclude_patterns=cat.get("exclude", ()))
+            texts = list(pool.map(lambda st: fetch_article(fetcher, st), candidates))
+            rows = [(st, *tx) for st, tx in zip(candidates, texts)]
+            chosen = choose(rows, n, ed.get("max_per_source", 2))
+            for st, _, _ in chosen:
+                used_urls.add(st.lead.url)
+                used_tokens.append(st.tokens)
+                used_topics.append(st.names)
+            out_cats.append({"id": cat["id"], "title": cat["title"],
+                             "stories": [story_json(st, text, why) for st, text, why in chosen]})
+            readable = sum(1 for _, text, _ in chosen if text)
+            log(f"  {cat['id']:15} {len(items):4} items -> {len(chosen)} stories ({readable} with full text)")
 
     markets, markets_err = None, None
     if config.get("markets"):
@@ -226,7 +246,8 @@ def summary_report(brief):
     for c in brief["categories"]:
         lines.append(f"## {c['title']}")
         for i, s in enumerate(c["stories"], 1):
-            note = f"{s['minutes']} min" if s["text"] else f"summary only: {s.get('no_text_reason', '')}"
+            note = (f"{s['minutes']} min" if s["text"] else
+                    f"summary only ({len(s['summary'])} chars): {s.get('no_text_reason', '')}")
             also = f" (+{len(s['also_in'])} more)" if s["also_in"] else ""
             lines.append(f"{i}. {s['title']} ({s['source']}{also}, {note})")
         lines.append("")
@@ -236,6 +257,11 @@ def summary_report(brief):
         for ix in m["indices"]:
             lines.append(f"- {ix['name']}: {ix['price']:,} ({ix['change_pct']:+.2f}%)")
         lines.append("")
+    if m:
+        movers = ", ".join(f"{q['name']} {q['change_pct']:+.1f}%" for q in m["gainers"] + m["losers"])
+        lines += [f"Movers: {movers} ({m['covered']})", ""]
+    full = [f"{s['feed']} ({s['full_text_in_feed']})" for s in brief["sources"] if s.get("full_text_in_feed")]
+    lines += [f"Feeds carrying full text: {', '.join(full) or 'none'}", ""]
     bad = [s for s in brief["sources"] if not s["ok"]]
     lines.append(f"Sources: {len(brief['sources']) - len(bad)} ok, {len(bad)} failed")
     for s in bad:
